@@ -10,6 +10,9 @@ import { IUniswapV2Pair } from "@uniswap/v2-core/contracts/interfaces/IUniswapV2
 import { IUniswapV2Factory } from "@uniswap/v2-core/contracts/interfaces/IUniswapV2Factory.sol";
 import { IUniswapV2Router02 } from "@uniswap/v2-periphery/contracts/interfaces/IUniswapV2Router02.sol";
 
+import { IUniswapV3Pool } from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Pool.sol";
+import { IUniswapV3Factory } from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Factory.sol";
+
 import { Token } from "../token/Token.sol";
 import { TokenLibrary } from "../token/TokenLibrary.sol";
 import { IVersioned } from "../utility/interfaces/IVersioned.sol";
@@ -22,7 +25,7 @@ import { IPoolToken } from "../pools/interfaces/IPoolToken.sol";
 
 import {IBancorArbitrage, PositionMigration } from "./interfaces/IBancorArbitrage.sol";
 
-struct MigrationResult {
+struct ArbitrageResult {
     IUniswapV2Pair pair;
     Token tokenA;
     Token tokenB;
@@ -182,7 +185,7 @@ contract BancorArbitrage is IBancorArbitrage, ReentrancyGuardUpgradeable, Utils,
         greaterThanZero(poolTokenAmount)
         returns (PositionMigration memory)
     {
-        MigrationResult memory res = _migrateUniswapV2Position(
+        ArbitrageResult memory res = _migrateUniswapV2Position(
             _uniswapV2Router,
             _uniswapV2Factory,
             token0,
@@ -220,7 +223,7 @@ contract BancorArbitrage is IBancorArbitrage, ReentrancyGuardUpgradeable, Utils,
         greaterThanZero(poolTokenAmount)
         returns (PositionMigration memory)
     {
-        MigrationResult memory res = _migrateUniswapV2Position(
+        ArbitrageResult memory res = _migrateUniswapV2Position(
             _sushiSwapRouter,
             _sushiSwapFactory,
             token0,
@@ -259,7 +262,7 @@ contract BancorArbitrage is IBancorArbitrage, ReentrancyGuardUpgradeable, Utils,
         Token token1,
         uint256 poolTokenAmount,
         address provider
-    ) private returns (MigrationResult memory) {
+    ) private returns (ArbitrageResult memory) {
         // arrange tokens in an array, replace WETH with the native token
         Token[2] memory tokens = [
             _isWETH(token0) ? TokenLibrary.NATIVE_TOKEN : token0,
@@ -306,7 +309,7 @@ contract BancorArbitrage is IBancorArbitrage, ReentrancyGuardUpgradeable, Utils,
         }
 
         return
-            MigrationResult({
+            ArbitrageResult({
                 pair: pair,
                 tokenA: tokens[0],
                 tokenB: tokens[1],
