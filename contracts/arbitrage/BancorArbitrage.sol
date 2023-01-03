@@ -134,13 +134,13 @@ contract BancorArbitrage is IBancorArbitrage, ReentrancyGuardUpgradeable, Utils,
     /**
      * @dev triggered after a successful Uniswap V2 Arbitrage Closed
      */
-    event UniswapV2ArbClosed(
+    event ArbitrageExecuted(
         address indexed caller,
-        IUniswapV2Pair pair,
         Token indexed sourceToken,
         Token indexed targetToken,
         uint256 sourceTokenAmt,
-        uint256 targetTokenAmt,
+        uint256 callerProfit,
+        uint256 burnAmount,
         uint256 profit,
         uint256 profitPercentage,
         uint256 profitMaxAmount
@@ -369,7 +369,7 @@ contract BancorArbitrage is IBancorArbitrage, ReentrancyGuardUpgradeable, Utils,
     /**
      * @dev executes the arbitrage trade
      */
-    function execute(tradeParams[] memory _trades) external payable returns (uint256) {
+    function execute(tradeParams[] memory _trades) external payable {
 
         bool isFirstValid = _trades[0].sourceToken.isEqual(_bnt);
         require(isFirstValid, "First trade source token must be BNT");
@@ -400,9 +400,30 @@ contract BancorArbitrage is IBancorArbitrage, ReentrancyGuardUpgradeable, Utils,
 
             if (i == _trades.length - 1) {
                 uint256 profit = res - _trades[0].sourceAmount;
-                _transferToCaller(targetToken, res, msg.sender);
+                uint256 callerProfit = profit * arbitrageProfitPercentagePPM / 1000000;
+
+                if (callerProfit > arbitrageProfitMaxAmount) {
+                    callerProfit = arbitrageProfitMaxAmount;
+                    uint256 burnAmount = profit - callerProfit;
+
+                } else {
+                    uint256 burnAmount = profit - callerProfit;
+                }
+                _transferToCaller(_bnt, callerProfit, msg.sender);
+                _bnt.burn(burnAmount);
+
+                emit ArbitrageExecuted(
+                    msg.sender,
+                    sourceToken,
+                    targetToken,
+                    sourceAmount,
+                    callerProfit,
+                    burnAmount,
+                    profit,
+                    profitPercentage,
+                    profitMaxAmount
+                );
             }
         }
-        return profit;
     }
 }
