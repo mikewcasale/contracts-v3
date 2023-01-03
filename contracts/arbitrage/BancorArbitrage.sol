@@ -23,7 +23,7 @@ import { IBancorNetwork } from "../network/interfaces/IBancorNetwork.sol";
 import { INetworkSettings } from "../network/interfaces/INetworkSettings.sol";
 import { IPoolToken } from "../pools/interfaces/IPoolToken.sol";
 
-import { IBancorArbitrage, TradeParams} from "./interfaces/IBancorArbitrage.sol";
+import { IBancorArbitrage, TradeParams } from "./interfaces/IBancorArbitrage.sol";
 import { ISwapRouter } from "@uniswap/v3-periphery/contracts/interfaces/ISwapRouter.sol";
 import "../../../arb_bot/contracts/exchanges/interfaces/IAbstractBaseExchange.sol";
 
@@ -45,70 +45,26 @@ contract BancorArbitrage is IBancorArbitrage, ReentrancyGuardUpgradeable, Utils,
     using SafeERC20 for IPoolToken;
     using TokenLibrary for Token;
     using Address for address payable;
-    uint256[2] memory profits;
 
-    // the settings for the ArbitrageProfits
-    ArbitrageSettings private _arbitrageSettings;
-
-    /**
-     * @inheritdoc IArbitrageTradeSettings
-     */
-    function getSettings() external view override returns (ArbitrageSettings memory) {
-        return _arbitrageSettings;
+    enum Exchange {
+        BancorV3,
+        UniswapV2,
+        UniswapV3,
+        Sushiswap
     }
 
-    /**
-     * @dev triggered when the settings of the ArbitrageProfits are updated
-     */
-    event ArbitrageSettingsUpdated(
-        uint32 prevProfitPercentagePPM,
-        uint32 newProfitPercentagePPM,
-        uint256 prevProfitMaxAmount,
-        uint256 newProfitMaxAmount
-    );
+    mapping(uint => Exchange) public exchangeMap;
 
-    /**
-     * @dev sets the settings of the ArbitrageTrade contract
-     *
-     * requirements:
-     *s
-     * - the caller must be the admin of the contract
-     */
-    function setArbitrageSettings(
-        ArbitrageSettings calldata settings
-    ) external onlyAdmin validFee(settings.arbitrageProfitPercentagePPM) greaterThanZero(settings.arbitrageProfitMaxAmount)
-    {
-        uint32 prevArbitrageProfitPercentagePPM = _arbitrageSettings.arbitrageProfitPercentagePPM;
-        uint256 prevArbitrageProfitMaxAmount = _arbitrageSettings.arbitrageProfitMaxAmount;
-
-        if (
-            prevArbitrageProfitPercentagePPM == settings.arbitrageProfitPercentagePPM &&
-            prevArbitrageProfitMaxAmount == settings.arbitrageProfitMaxAmount
-        ) {
-            return;
-        }
-
-        _arbitrageSettings = settings;
-
-        emit ArbitrageSettingsUpdated({
-            prevProfitPercentagePPM: prevArbitrageProfitPercentagePPM,
-            newProfitPercentagePPM: settings.arbitrageProfitPercentagePPM,
-            prevProfitMaxAmount: prevArbitrageProfitMaxAmount,
-            newProfitMaxAmount: settings.arbitrageProfitMaxAmount
-        });
-    }
-
-
-    // using 'seconds' for convenience, for mainnet pass deadline from frontend!
-    uint256 deadline = block.timestamp + 15;
-
-    uint32 private constant MAX_DEADLINE = 10800;
+    uint32 private constant MAX_DEADLINE = 10000;
 
     // the network contract
     IBancorNetwork private immutable _network;
 
     // the network settings contract
     INetworkSettings private immutable _networkSettings;
+
+    // the settings for the ArbitrageProfits
+    ArbitrageSettings private _arbitrageSettings;
 
     // the bnt contract
     IERC20 private immutable _bnt;
@@ -146,6 +102,16 @@ contract BancorArbitrage is IBancorArbitrage, ReentrancyGuardUpgradeable, Utils,
         uint256 profitMaxAmount
     );
 
+    /**
+     * @dev triggered when the settings of the contract are updated
+     */
+    event ArbitrageSettingsUpdated(
+        uint32 prevProfitPercentagePPM,
+        uint32 newProfitPercentagePPM,
+        uint256 prevProfitMaxAmount,
+        uint256 newProfitMaxAmount
+    );
+
     error UnsupportedTokens();
     error NoPairForTokens();
 
@@ -180,6 +146,11 @@ contract BancorArbitrage is IBancorArbitrage, ReentrancyGuardUpgradeable, Utils,
         _sushiSwapRouter = initSushiSwapRouter;
         _sushiSwapFactory = initSushiSwapFactory;
         _weth = IERC20(initUniswapV2Router.WETH());
+
+        exchangeMap[0] = Exchange.BancorV3;
+        exchangeMap[1] = Exchange.UniswapV2;
+        exchangeMap[2] = Exchange.UniswapV3;
+        exchangeMap[3] = Exchange.Sushiswap;
     }
 
     /**
@@ -219,10 +190,52 @@ contract BancorArbitrage is IBancorArbitrage, ReentrancyGuardUpgradeable, Utils,
     receive() external payable {}
 
     /**
+     * @inheritdoc IArbitrageTradeSettings
+     */
+    function getSettings() external view override returns (ArbitrageSettings memory) {
+        return _arbitrageSettings;
+    }
+
+    /**
+     * @dev sets the settings of the ArbitrageTrade contract
+     *
+     * requirements:
+     *s
+     * - the caller must be the admin of the contract
+     */
+    function setArbitrageSettings(
+        ArbitrageSettings calldata settings
+    )
+    external
+    onlyAdmin
+    validFee(settings.arbitrageProfitPercentagePPM)
+    greaterThanZero(settings.arbitrageProfitMaxAmount)
+    {
+        uint32 prevArbitrageProfitPercentagePPM = _arbitrageSettings.arbitrageProfitPercentagePPM;
+        uint256 prevArbitrageProfitMaxAmount = _arbitrageSettings.arbitrageProfitMaxAmount;
+
+        if (
+            prevArbitrageProfitPercentagePPM == settings.arbitrageProfitPercentagePPM &&
+            prevArbitrageProfitMaxAmount == settings.arbitrageProfitMaxAmount
+        ) {
+            return;
+        }
+
+        _arbitrageSettings = settings;
+
+        emit ArbitrageSettingsUpdated({
+        prevProfitPercentagePPM: prevArbitrageProfitPercentagePPM,
+        newProfitPercentagePPM: settings.arbitrageProfitPercentagePPM,
+        prevProfitMaxAmount: prevArbitrageProfitMaxAmount,
+        newProfitMaxAmount: settings.arbitrageProfitMaxAmount
+        });
+    }
+
+    /**
      * @dev takes a flash loan to perform the arbitrage trade
      */
     function takeFlashLoan(uint256 _amount) private {
-        bancorNetwork.flashLoan(Token(BNT), _amount, IFlashLoanRecipient(address(this)), '0x');
+        bancorNetwork.flashLoan(Token(BNT), _amount, IFlashLoanRecipient(address(this)), "0x");
     }
 
     /**
@@ -240,13 +253,7 @@ contract BancorArbitrage is IBancorArbitrage, ReentrancyGuardUpgradeable, Utils,
         greaterThanZero(sourceTokenAmount)
         returns (uint256 targetTokenAmount)
     {
-        uint256 res = _tradeUniswapV2(
-            _uniswapV2Router,
-            _uniswapV2Factory,
-            sourceToken,
-            targetToken,
-            sourceTokenAmount
-        );
+        uint256 res = _tradeUniswapV2(_uniswapV2Router, _uniswapV2Factory, sourceToken, targetToken, sourceTokenAmount);
 
         return res;
     }
@@ -262,7 +269,6 @@ contract BancorArbitrage is IBancorArbitrage, ReentrancyGuardUpgradeable, Utils,
         uint256 sourceTokenAmount,
         address caller
     ) private returns (uint256 targetTokenAmount) {
-
         uint24 fee = 3000;
         address recipient = address(this);
         uint160 sqrtPriceLimitX96 = 0;
@@ -303,7 +309,6 @@ contract BancorArbitrage is IBancorArbitrage, ReentrancyGuardUpgradeable, Utils,
         return targetTokenAmount;
     }
 
-
     /**
      * @dev swaps on Uniswap V2
      */
@@ -331,11 +336,7 @@ contract BancorArbitrage is IBancorArbitrage, ReentrancyGuardUpgradeable, Utils,
     /**
      * @dev transfer given amount of given token to the caller
      */
-    function _transferToCaller(
-        Token token,
-        uint256 amount,
-        address caller
-    ) private {
+    function _transferToCaller(Token token, uint256 amount, address caller) private {
         if (token.isNative()) {
             payable(caller).sendValue(amount);
         } else {
@@ -346,11 +347,10 @@ contract BancorArbitrage is IBancorArbitrage, ReentrancyGuardUpgradeable, Utils,
     /**
      * @dev fetches a UniswapV2 pair
      */
-    function _getUniswapV2Pair(IUniswapV2Factory factory, Token[2] memory tokens)
-        private
-        view
-        returns (IUniswapV2Pair)
-    {
+    function _getUniswapV2Pair(
+        IUniswapV2Factory factory,
+        Token[2] memory tokens
+    ) private view returns (IUniswapV2Pair) {
         // Uniswap does not support ETH input, transform to WETH if necessary
         address sourceTokenAddress = tokens[0].isNative() ? address(_weth) : address(tokens[0]);
         address targetTokenAddress = tokens[1].isNative() ? address(_weth) : address(tokens[1]);
@@ -371,14 +371,18 @@ contract BancorArbitrage is IBancorArbitrage, ReentrancyGuardUpgradeable, Utils,
      */
     function execute(tradeParams[] memory _trades) external payable {
 
+        // check if the initial trade source token is BNT
         bool isFirstValid = _trades[0].sourceToken.isEqual(_bnt);
         require(isFirstValid, "First trade source token must be BNT");
 
+        // check if the last trade target token is BNT
         bool isLastValid = _trades[_trades.length - 1].targetToken.isEqual(_bnt);
         require(isLastValid, "Last trade target token must be BNT");
 
         // perform the trades
-        for (uint i=0; i< _trades.length; i++) {
+        for (uint i = 0; i < _trades.length; i++) {
+
+            // parse the trade params
             Token sourceToken = _trades[i].sourceToken;
             Token targetToken = _trades[i].targetToken;
             uint256 sourceAmount = _trades[i].sourceAmount;
@@ -386,32 +390,71 @@ contract BancorArbitrage is IBancorArbitrage, ReentrancyGuardUpgradeable, Utils,
             uint256 deadline = _trades[i].deadline;
             uint exchangeId = _trades[i].exchangeId;
 
-            if (exchangeId == 0) {
-                uint256 res = tradeBancorV3(sourceToken, targetToken, sourceAmount, minReturnAmount, deadline, address(this));
-            } else if (exchangeId == 1) {
-                uint256 res = tradeSushiSwap(sourceToken, targetToken, sourceAmount, minReturnAmount, deadline, address(this));
-            } else if (exchangeId == 2) {
-                uint256 res = tradeUniswapV2(sourceToken, targetToken, sourceAmount, minReturnAmount, deadline, address(this));
-            } else if (exchangeId == 3) {
-                uint256 res = tradeUniswapV3(sourceToken, targetToken, sourceAmount, minReturnAmount, deadline, address(this));
+            // route the trade to the correct exchange
+            if (Exchanges[exchangeId] == "BancorV3") {
+                uint256 res = tradeBancorV3(
+                    sourceToken,
+                    targetToken,
+                    sourceAmount,
+                    minReturnAmount,
+                    deadline,
+                    address(this)
+                );
+            } else if (Exchanges[exchangeId] == "SuchiSwap") {
+                uint256 res = tradeSushiSwap(
+                    sourceToken,
+                    targetToken,
+                    sourceAmount,
+                    minReturnAmount,
+                    deadline,
+                    address(this)
+                );
+            } else if (Exchanges[exchangeId] == "UniswapV2") {
+                uint256 res = tradeUniswapV2(
+                    sourceToken,
+                    targetToken,
+                    sourceAmount,
+                    minReturnAmount,
+                    deadline,
+                    address(this)
+                );
+            } else if (Exchanges[exchangeId] == "UniswapV3") {
+                uint256 res = tradeUniswapV3(
+                    sourceToken,
+                    targetToken,
+                    sourceAmount,
+                    minReturnAmount,
+                    deadline,
+                    address(this)
+                );
             } else {
                 revert("invalid exchangeId");
             }
 
+            // on the last trade, transfer the appropriate BNT profit to the caller and burn the rest
             if (i == _trades.length - 1) {
-                uint256 profit = res - _trades[0].sourceAmount;
-                uint256 callerProfit = profit * arbitrageProfitPercentagePPM / 1000000;
 
+                // calculate the profit
+                uint256 totalProfit = res - _trades[0].sourceAmount;
+
+                // calculate the proportion of the profit to send to the caller
+                uint256 callerProfit = (totalProfit * arbitrageProfitPercentagePPM) / 1000000;
+
+                // calculate the proportion of the profit to burn
                 if (callerProfit > arbitrageProfitMaxAmount) {
                     callerProfit = arbitrageProfitMaxAmount;
-                    uint256 burnAmount = profit - callerProfit;
-
+                    uint256 burnAmount = totalProfit - callerProfit;
                 } else {
-                    uint256 burnAmount = profit - callerProfit;
+                    uint256 burnAmount = totalProfit - callerProfit;
                 }
+
+                // transfer the appropriate profit to the caller
                 _transferToCaller(_bnt, callerProfit, msg.sender);
+
+                // burn the rest
                 _bnt.burn(burnAmount);
 
+                // emit the event
                 emit ArbitrageExecuted(
                     msg.sender,
                     sourceToken,
@@ -419,7 +462,7 @@ contract BancorArbitrage is IBancorArbitrage, ReentrancyGuardUpgradeable, Utils,
                     sourceAmount,
                     callerProfit,
                     burnAmount,
-                    profit,
+                    totalProfit,
                     profitPercentage,
                     profitMaxAmount
                 );
