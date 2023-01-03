@@ -250,7 +250,7 @@ contract BancorArbitrage is ReentrancyGuardUpgradeable, Utils, Upgradeable {
     /**
      * @dev performs the arbitrage trade on Bancor V3
      */
-    function tradeBancorV3(
+    function _tradeBancorV3(
         Token sourceToken,
         Token targetToken,
         uint256 sourceTokenAmount,
@@ -258,7 +258,7 @@ contract BancorArbitrage is ReentrancyGuardUpgradeable, Utils, Upgradeable {
         uint256 minReturn,
         uint256 deadline
     )
-        external
+        private
         returns (uint256)
     {
         // TODO: implement
@@ -269,7 +269,7 @@ contract BancorArbitrage is ReentrancyGuardUpgradeable, Utils, Upgradeable {
     /**
      * @dev performs the arbitrage trade on Uniswap V3
      */
-    function tradeUniswapV3(
+    function _tradeUniswapV3(
         Token sourceToken,
         Token targetToken,
         uint256 sourceTokenAmount,
@@ -277,7 +277,7 @@ contract BancorArbitrage is ReentrancyGuardUpgradeable, Utils, Upgradeable {
         uint256 minReturn,
         uint256 deadline
     )
-        external
+        private
         returns (uint256)
     {
         // TODO: implement
@@ -288,7 +288,7 @@ contract BancorArbitrage is ReentrancyGuardUpgradeable, Utils, Upgradeable {
     /**
      * @dev performs the arbitrage trade on SushiSwap
      */
-    function tradeSushiSwap(
+    function _tradeSushiSwap(
         Token sourceToken,
         Token targetToken,
         uint256 sourceTokenAmount,
@@ -296,31 +296,11 @@ contract BancorArbitrage is ReentrancyGuardUpgradeable, Utils, Upgradeable {
         uint256 minReturn,
         uint256 deadline
     )
-        external
+        private
         returns (uint256)
     {
         // TODO: implement
         uint256 res = 0;
-        return res;
-    }
-
-    /**
-     * @dev performs the arbitrage trade on Uniswap V2
-     */
-    function tradeUniswapV2(
-        Token sourceToken,
-        Token targetToken,
-        uint256 sourceTokenAmount
-    )
-    external
-        nonReentrant
-        validAddress(address(sourceToken))
-        validAddress(address(targetToken))
-        greaterThanZero(sourceTokenAmount)
-        returns (uint256 targetTokenAmount)
-    {
-        uint256 res = _tradeUniswapV2(_uniswapV2Router, _uniswapV2Factory, sourceToken, targetToken, sourceTokenAmount, msg.sender);
-
         return res;
     }
 
@@ -442,9 +422,9 @@ contract BancorArbitrage is ReentrancyGuardUpgradeable, Utils, Upgradeable {
 
         // get the settings for the current transaction
         uint256 burnAmount = 0;
-        uint256 callerProfit = 0;
         uint256 totalProfit = 0;
         uint256 res = 0;
+        uint256 callerProfit = 0;
 
         // check if the initial trade source token is BNT
         bool isFirstValid = _trades[0].sourceToken.isEqual(_bnt);
@@ -468,7 +448,7 @@ contract BancorArbitrage is ReentrancyGuardUpgradeable, Utils, Upgradeable {
             // route the trade to the correct exchange
             if (exchangeId == 0) {
                 // Bancor V3
-                res = tradeBancorV3(
+                res = _tradeBancorV3(
                     sourceToken,
                     targetToken,
                     sourceAmount,
@@ -478,7 +458,7 @@ contract BancorArbitrage is ReentrancyGuardUpgradeable, Utils, Upgradeable {
                 );
             } else if (exchangeId == 1) {
                 // SushiSwap
-                res = tradeSushiSwap(
+                res = _tradeSushiSwap(
                     sourceToken,
                     targetToken,
                     sourceAmount,
@@ -488,17 +468,17 @@ contract BancorArbitrage is ReentrancyGuardUpgradeable, Utils, Upgradeable {
                 );
             } else if (exchangeId == 2) {
                 // Uniswap V2
-                res = tradeUniswapV2(
+                res = _tradeUniswapV2(
+                    _uniswapV2Router,
+                    _uniswapV2Factory,
                     sourceToken,
                     targetToken,
-                    sourceAmount
-//                    0,
-//                    minReturnAmount,
-//                    deadline
+                    sourceAmount,
+                    address(this)
                 );
             } else if (exchangeId == 3) {
                 // Uniswap V3
-                res = tradeUniswapV3(
+                res = _tradeUniswapV3(
                     sourceToken,
                     targetToken,
                     sourceAmount,
@@ -532,20 +512,21 @@ contract BancorArbitrage is ReentrancyGuardUpgradeable, Utils, Upgradeable {
 
                 // burn the rest
                 _bntPool.burnFromVault(burnAmount);
-
-                // emit the event
-                emit ArbitrageExecuted(
-                    msg.sender,
-                    sourceToken,
-                    targetToken,
-                    sourceAmount,
-                    callerProfit,
-                    burnAmount,
-                    totalProfit,
-                    settings.arbitrageProfitPercentagePPM,
-                    settings.arbitrageProfitMaxAmount
-                );
             }
         }
+
+    // emit the event
+    emit ArbitrageExecuted(
+        msg.sender,
+        _trades[1].sourceToken,
+        _trades[1].targetToken,
+        _trades[0].sourceAmount,
+        callerProfit,
+        burnAmount,
+        totalProfit,
+        settings.arbitrageProfitPercentagePPM,
+        settings.arbitrageProfitMaxAmount
+    );
+
     }
 }
