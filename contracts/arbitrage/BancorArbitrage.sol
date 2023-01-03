@@ -87,7 +87,7 @@ contract BancorArbitrage is ReentrancyGuardUpgradeable, Utils, Upgradeable {
     IUniswapV2Factory private immutable _uniswapV2Factory;
 
     // Uniswap v3 factory contract
-    IUniswapV3Factory private immutable _uniswapV3Factory;
+    ISwapRouter private immutable _uniswapV3Router;
 
     // SushiSwap router contract
     IUniswapV2Router02 private immutable _sushiSwapRouter;
@@ -136,7 +136,7 @@ contract BancorArbitrage is ReentrancyGuardUpgradeable, Utils, Upgradeable {
         IBancorNetwork initNetwork,
         INetworkSettings initNetworkSettings,
         IERC20 initBnt,
-        IUniswapV3Factory initUniswapV3Factory,
+        ISwapRouter initUniswapV3Router,
         IUniswapV2Router02 initUniswapV2Router,
         IUniswapV2Factory initUniswapV2Factory,
         IUniswapV2Router02 initSushiSwapRouter,
@@ -145,7 +145,7 @@ contract BancorArbitrage is ReentrancyGuardUpgradeable, Utils, Upgradeable {
         validAddress(address(initNetwork))
         validAddress(address(initNetworkSettings))
         validAddress(address(initBnt))
-        validAddress(address(initUniswapV3Factory))
+        validAddress(address(initUniswapV3Router))
         validAddress(address(initUniswapV2Router))
         validAddress(address(initUniswapV2Factory))
         validAddress(address(initSushiSwapRouter))
@@ -154,7 +154,7 @@ contract BancorArbitrage is ReentrancyGuardUpgradeable, Utils, Upgradeable {
         _network = initNetwork;
         _networkSettings = initNetworkSettings;
         _bnt = initBnt;
-        _uniswapV3Factory = initUniswapV3Factory;
+        _uniswapV3Router = initUniswapV3Router;
         _uniswapV2Router = initUniswapV2Router;
         _uniswapV2Factory = initUniswapV2Factory;
         _sushiSwapRouter = initSushiSwapRouter;
@@ -256,20 +256,27 @@ contract BancorArbitrage is ReentrancyGuardUpgradeable, Utils, Upgradeable {
         uint256 sourceTokenAmount,
         uint256 minTargetTokenAmount,
         uint256 minReturn,
-        uint256 deadline
+        uint256 deadline,
+        address caller
     )
         private
         returns (uint256)
     {
-        // TODO: implement
-        uint256 res = 0;
-        return res;
+        return _network.tradeBySourceAmount(
+            sourceToken,
+            targetToken,
+            sourceTokenAmount,
+            minTargetTokenAmount,
+            deadline,
+            address(this)
+        );
     }
 
     /**
      * @dev performs the arbitrage trade on Uniswap V3
      */
     function _tradeUniswapV3(
+        ISwapRouter router,
         Token sourceToken,
         Token targetToken,
         uint256 sourceTokenAmount,
@@ -280,8 +287,22 @@ contract BancorArbitrage is ReentrancyGuardUpgradeable, Utils, Upgradeable {
         private
         returns (uint256)
     {
-        // TODO: implement
-        uint256 res = 0;
+        uint24 fee = 3000;
+        address recipient = address(this);
+        uint160 sqrtPriceLimitX96 = 0;
+
+        ISwapRouter.ExactInputSingleParams memory params = ISwapRouter.ExactInputSingleParams(
+            address(sourceToken),
+            address(targetToken),
+            fee,
+            recipient,
+            deadline,
+            sourceTokenAmount,
+            minTargetTokenAmount,
+            sqrtPriceLimitX96
+        );
+
+        uint256 res = router.exactInputSingle(params);
         return res;
     }
 
@@ -289,6 +310,7 @@ contract BancorArbitrage is ReentrancyGuardUpgradeable, Utils, Upgradeable {
      * @dev performs the arbitrage trade on SushiSwap
      */
     function _tradeSushiSwap(
+        IUniswapV2Router02 router,
         Token sourceToken,
         Token targetToken,
         uint256 sourceTokenAmount,
@@ -299,8 +321,19 @@ contract BancorArbitrage is ReentrancyGuardUpgradeable, Utils, Upgradeable {
         private
         returns (uint256)
     {
-        // TODO: implement
-        uint256 res = 0;
+        address[] memory path = new address[](2);
+        path[0] = address(sourceToken);
+        path[1] = address(targetToken);
+
+        uint[] memory amounts = router.swapExactTokensForTokens(
+            sourceTokenAmount,
+            minTargetTokenAmount,
+            path,
+            address(this),
+            deadline
+        );
+
+        uint256 res = amounts[1];
         return res;
     }
 
@@ -348,25 +381,6 @@ contract BancorArbitrage is ReentrancyGuardUpgradeable, Utils, Upgradeable {
         }
 
         // trade on UniswapV2
-        _uniV2Swap(router, pair, tokens, sourceTokenAmount, fee, recipient, sqrtPriceLimitX96);
-
-        // calculate the amount of target tokens received
-        uint256 targetTokenAmount = tokens[1].balanceOf(address(this)) - previousBalances[1];
-        return targetTokenAmount;
-    }
-
-    /**
-     * @dev swaps on Uniswap V2
-     */
-    function _uniV2Swap(
-        IUniswapV2Router02 router,
-        IUniswapV2Pair pair,
-        Token[2] memory tokens,
-        uint256 sourceTokenAmount,
-        uint24 fee,
-        address recipient,
-        uint160 sqrtPriceLimitX96
-    ) private {
         IERC20(address(pair)).safeApprove(address(router), sourceTokenAmount);
         uint256 deadline = block.timestamp + MAX_DEADLINE;
         address[] memory path = new address[](2);
@@ -380,7 +394,12 @@ contract BancorArbitrage is ReentrancyGuardUpgradeable, Utils, Upgradeable {
         } else {
             router.swapExactTokensForTokens(sourceTokenAmount, 0, path, recipient, deadline);
         }
+
+        // calculate the amount of target tokens received
+        uint256 targetTokenAmount = tokens[1].balanceOf(address(this)) - previousBalances[1];
+        return targetTokenAmount;
     }
+
 
     /**
      * @dev transfer given amount of given token to the caller
@@ -454,11 +473,13 @@ contract BancorArbitrage is ReentrancyGuardUpgradeable, Utils, Upgradeable {
                     sourceAmount,
                     0,
                     minReturnAmount,
-                    deadline
+                    deadline,
+                    msg.sender
                 );
             } else if (exchangeId == 1) {
                 // SushiSwap
                 res = _tradeSushiSwap(
+                    _sushiSwapRouter,
                     sourceToken,
                     targetToken,
                     sourceAmount,
@@ -479,6 +500,7 @@ contract BancorArbitrage is ReentrancyGuardUpgradeable, Utils, Upgradeable {
             } else if (exchangeId == 3) {
                 // Uniswap V3
                 res = _tradeUniswapV3(
+                    _uniswapV3Router,
                     sourceToken,
                     targetToken,
                     sourceAmount,
