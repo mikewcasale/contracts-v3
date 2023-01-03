@@ -23,7 +23,6 @@ import { IBancorNetwork, IFlashLoanRecipient } from "../network/interfaces/IBanc
 import { INetworkSettings } from "../network/interfaces/INetworkSettings.sol";
 import { IPoolToken } from "../pools/interfaces/IPoolToken.sol";
 
-//import { IBancorArbitrage, tradeParams, ArbitrageSettings } from "./interfaces/IBancorArbitrage.sol";
 import { ISwapRouter } from "@uniswap/v3-periphery/contracts/interfaces/ISwapRouter.sol";
 
 import { IBNTPool } from "../pools/interfaces/IBNTPool.sol";
@@ -160,6 +159,10 @@ contract BancorArbitrage is ReentrancyGuardUpgradeable, Utils, Upgradeable {
         _sushiSwapRouter = initSushiSwapRouter;
         _sushiSwapFactory = initSushiSwapFactory;
         _weth = IERC20(initUniswapV2Router.WETH());
+        _arbitrageSettings = ArbitrageSettings({
+            arbitrageProfitPercentagePPM: 10,
+            arbitrageProfitMaxAmount: 100
+        });
     }
 
     /**
