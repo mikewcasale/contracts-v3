@@ -30,6 +30,12 @@ import "../../../arb_bot/contracts/exchanges/interfaces/IAbstractBaseExchange.so
 error InvalidTokenFirst();
 error InvalidTokenLast();
 
+struct ArbitrageSettings {
+    // the percentage of arbitrage profits to be sent to the initiator of the arbitrage event (in units of PPM)
+    uint32 arbitrageProfitPercentagePPM;
+    // the maximum arbitrage profit to be sent to the initiator of the arbitrage event
+    uint256 arbitrageProfitMaxAmount;
+}
 
 /**
  * @dev one click liquidity migration between other DEXes into Bancor v3
@@ -40,6 +46,58 @@ contract BancorArbitrage is IBancorArbitrage, ReentrancyGuardUpgradeable, Utils,
     using TokenLibrary for Token;
     using Address for address payable;
     uint256[2] memory profits;
+
+    // the settings for the ArbitrageProfits
+    ArbitrageSettings private _arbitrageSettings;
+
+    /**
+     * @inheritdoc IArbitrageTradeSettings
+     */
+    function getSettings() external view override returns (ArbitrageSettings memory) {
+        return _arbitrageSettings;
+    }
+
+    /**
+     * @dev triggered when the settings of the ArbitrageProfits are updated
+     */
+    event ArbitrageSettingsUpdated(
+        uint32 prevProfitPercentagePPM,
+        uint32 newProfitPercentagePPM,
+        uint256 prevProfitMaxAmount,
+        uint256 newProfitMaxAmount
+    );
+
+    /**
+     * @dev sets the settings of the ArbitrageTrade contract
+     *
+     * requirements:
+     *s
+     * - the caller must be the admin of the contract
+     */
+    function setArbitrageSettings(
+        ArbitrageSettings calldata settings
+    ) external onlyAdmin validFee(settings.arbitrageProfitPercentagePPM) greaterThanZero(settings.arbitrageProfitMaxAmount)
+    {
+        uint32 prevArbitrageProfitPercentagePPM = _arbitrageSettings.arbitrageProfitPercentagePPM;
+        uint256 prevArbitrageProfitMaxAmount = _arbitrageSettings.arbitrageProfitMaxAmount;
+
+        if (
+            prevArbitrageProfitPercentagePPM == settings.arbitrageProfitPercentagePPM &&
+            prevArbitrageProfitMaxAmount == settings.arbitrageProfitMaxAmount
+        ) {
+            return;
+        }
+
+        _arbitrageSettings = settings;
+
+        emit ArbitrageSettingsUpdated({
+            prevProfitPercentagePPM: prevArbitrageProfitPercentagePPM,
+            newProfitPercentagePPM: settings.arbitrageProfitPercentagePPM,
+            prevProfitMaxAmount: prevArbitrageProfitMaxAmount,
+            newProfitMaxAmount: settings.arbitrageProfitMaxAmount
+        });
+    }
+
 
     // using 'seconds' for convenience, for mainnet pass deadline from frontend!
     uint256 deadline = block.timestamp + 15;
@@ -78,13 +136,14 @@ contract BancorArbitrage is IBancorArbitrage, ReentrancyGuardUpgradeable, Utils,
      */
     event UniswapV2ArbClosed(
         address indexed caller,
-        IUniswapV2Pair poolToken,
+        IUniswapV2Pair pair,
         Token indexed sourceToken,
         Token indexed targetToken,
         uint256 sourceTokenAmt,
         uint256 targetTokenAmt,
-        bool depositedA,
-        bool depositedB
+        uint256 profit,
+        uint256 profitPercentage,
+        uint256 profitMaxAmount
     );
 
     error UnsupportedTokens();
@@ -158,6 +217,13 @@ contract BancorArbitrage is IBancorArbitrage, ReentrancyGuardUpgradeable, Utils,
      * @dev authorize the contract to receive the native token
      */
     receive() external payable {}
+
+    /**
+     * @dev takes a flash loan to perform the arbitrage trade
+     */
+    function takeFlashLoan(uint256 _amount) private {
+        bancorNetwork.flashLoan(Token(BNT), _amount, IFlashLoanRecipient(address(this)), '0x');
+    }
 
     /**
      * @inheritdoc IBancorArbitrage
@@ -239,7 +305,7 @@ contract BancorArbitrage is IBancorArbitrage, ReentrancyGuardUpgradeable, Utils,
 
 
     /**
-     * @dev removes liquidity from Uniswap's pair, transfer funds to self
+     * @dev swaps on Uniswap V2
      */
     function _uniV2Swap(
         IUniswapV2Router02 router,
