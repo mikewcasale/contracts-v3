@@ -23,17 +23,13 @@ import { IBancorNetwork } from "../network/interfaces/IBancorNetwork.sol";
 import { INetworkSettings } from "../network/interfaces/INetworkSettings.sol";
 import { IPoolToken } from "../pools/interfaces/IPoolToken.sol";
 
-import {IBancorArbitrage, PositionMigration } from "./interfaces/IBancorArbitrage.sol";
+import { IBancorArbitrage, TradeParams} from "./interfaces/IBancorArbitrage.sol";
+import { ISwapRouter } from "@uniswap/v3-periphery/contracts/interfaces/ISwapRouter.sol";
+import "../../../arb_bot/contracts/exchanges/interfaces/IAbstractBaseExchange.sol";
 
-struct ArbitrageResult {
-    IUniswapV2Pair pair;
-    Token tokenA;
-    Token tokenB;
-    bool depositedA;
-    bool depositedB;
-    uint256 amountA;
-    uint256 amountB;
-}
+error InvalidTokenFirst();
+error InvalidTokenLast();
+
 
 /**
  * @dev one click liquidity migration between other DEXes into Bancor v3
@@ -43,6 +39,10 @@ contract BancorArbitrage is IBancorArbitrage, ReentrancyGuardUpgradeable, Utils,
     using SafeERC20 for IPoolToken;
     using TokenLibrary for Token;
     using Address for address payable;
+    uint256[2] memory profits;
+
+    // using 'seconds' for convenience, for mainnet pass deadline from frontend!
+    uint256 deadline = block.timestamp + 15;
 
     uint32 private constant MAX_DEADLINE = 10800;
 
@@ -74,29 +74,15 @@ contract BancorArbitrage is IBancorArbitrage, ReentrancyGuardUpgradeable, Utils,
     uint256[MAX_GAP - 0] private __gap;
 
     /**
-     * @dev triggered after a successful Uniswap V2 migration
+     * @dev triggered after a successful Uniswap V2 Arbitrage Closed
      */
-    event UniswapV2PositionMigrated(
-        address indexed provider,
+    event UniswapV2ArbClosed(
+        address indexed caller,
         IUniswapV2Pair poolToken,
-        Token indexed tokenA,
-        Token indexed tokenB,
-        uint256 amountA,
-        uint256 amountB,
-        bool depositedA,
-        bool depositedB
-    );
-
-    /**
-     * @dev triggered after a successful SushiSwap V1 migration
-     */
-    event SushiSwapPositionMigrated(
-        address indexed provider,
-        IUniswapV2Pair poolToken,
-        Token indexed tokenA,
-        Token indexed tokenB,
-        uint256 amountA,
-        uint256 amountB,
+        Token indexed sourceToken,
+        Token indexed targetToken,
+        uint256 sourceTokenAmt,
+        uint256 targetTokenAmt,
         bool depositedA,
         bool depositedB
     );
@@ -111,6 +97,7 @@ contract BancorArbitrage is IBancorArbitrage, ReentrancyGuardUpgradeable, Utils,
         IBancorNetwork initNetwork,
         INetworkSettings initNetworkSettings,
         IERC20 initBnt,
+        IUniswapV3Factory initUniswapV3Factory,
         IUniswapV2Router02 initUniswapV2Router,
         IUniswapV2Factory initUniswapV2Factory,
         IUniswapV2Router02 initSushiSwapRouter,
@@ -119,6 +106,7 @@ contract BancorArbitrage is IBancorArbitrage, ReentrancyGuardUpgradeable, Utils,
         validAddress(address(initNetwork))
         validAddress(address(initNetworkSettings))
         validAddress(address(initBnt))
+        validAddress(address(initUniswapV3Factory))
         validAddress(address(initUniswapV2Router))
         validAddress(address(initUniswapV2Factory))
         validAddress(address(initSushiSwapRouter))
@@ -127,6 +115,7 @@ contract BancorArbitrage is IBancorArbitrage, ReentrancyGuardUpgradeable, Utils,
         _network = initNetwork;
         _networkSettings = initNetworkSettings;
         _bnt = initBnt;
+        _uniswapV3Factory = initUniswapV3Factory;
         _uniswapV2Router = initUniswapV2Router;
         _uniswapV2Factory = initUniswapV2Factory;
         _sushiSwapRouter = initSushiSwapRouter;
@@ -138,14 +127,14 @@ contract BancorArbitrage is IBancorArbitrage, ReentrancyGuardUpgradeable, Utils,
      * @inheritdoc Upgradeable
      */
     function version() public pure override(IVersioned, Upgradeable) returns (uint16) {
-        return 3;
+        return 1;
     }
 
     /**
      * @dev fully initializes the contract and its parents
      */
     function initialize() external initializer {
-        __BancorPortal_init();
+        __BancorArbitrage_init();
     }
 
     // solhint-disable func-name-mixedcase
@@ -153,17 +142,17 @@ contract BancorArbitrage is IBancorArbitrage, ReentrancyGuardUpgradeable, Utils,
     /**
      * @dev initializes the contract and its parents
      */
-    function __BancorPortal_init() internal onlyInitializing {
+    function __BancorArbitrage_init() internal onlyInitializing {
         __ReentrancyGuard_init();
         __Upgradeable_init();
 
-        __BancorPortal_init_unchained();
+        __BancorArbitrage_init_unchained();
     }
 
     /**
      * @dev performs contract-specific initialization
      */
-    function __BancorPortal_init_unchained() internal onlyInitializing {}
+    function __BancorArbitrage_init_unchained() internal onlyInitializing {}
 
     /**
      * @dev authorize the contract to receive the native token
@@ -171,102 +160,51 @@ contract BancorArbitrage is IBancorArbitrage, ReentrancyGuardUpgradeable, Utils,
     receive() external payable {}
 
     /**
-     * @inheritdoc IBancorPortal
+     * @inheritdoc IBancorArbitrage
      */
-    function migrateUniswapV2Position(
-        Token token0,
-        Token token1,
-        uint256 poolTokenAmount
+    function tradeUniswapV2(
+        Token sourceToken,
+        Token targetToken,
+        uint256 sourceTokenAmount
     )
         external
         nonReentrant
-        validAddress(address(token0))
-        validAddress(address(token1))
-        greaterThanZero(poolTokenAmount)
-        returns (PositionMigration memory)
+        validAddress(address(sourceToken))
+        validAddress(address(targetToken))
+        greaterThanZero(sourceTokenAmount)
+        returns (uint256 targetTokenAmount)
     {
-        ArbitrageResult memory res = _migrateUniswapV2Position(
+        uint256 res = _tradeUniswapV2(
             _uniswapV2Router,
             _uniswapV2Factory,
-            token0,
-            token1,
-            poolTokenAmount,
-            msg.sender
+            sourceToken,
+            targetToken,
+            sourceTokenAmount
         );
 
-        emit UniswapV2PositionMigrated({
-            provider: msg.sender,
-            poolToken: res.pair,
-            tokenA: res.tokenA,
-            tokenB: res.tokenB,
-            amountA: res.amountA,
-            amountB: res.amountB,
-            depositedA: res.depositedA,
-            depositedB: res.depositedB
-        });
-
-        return PositionMigration({ amountA: res.amountA, amountB: res.amountB });
+        return res;
     }
 
     /**
-     * @inheritdoc IBancorPortal
+     * @dev trades on Uniswap V2
      */
-    function migrateSushiSwapPosition(
-        Token token0,
-        Token token1,
-        uint256 poolTokenAmount
-    )
-        external
-        nonReentrant
-        validAddress(address(token0))
-        validAddress(address(token1))
-        greaterThanZero(poolTokenAmount)
-        returns (PositionMigration memory)
-    {
-        ArbitrageResult memory res = _migrateUniswapV2Position(
-            _sushiSwapRouter,
-            _sushiSwapFactory,
-            token0,
-            token1,
-            poolTokenAmount,
-            msg.sender
-        );
-
-        emit SushiSwapPositionMigrated({
-            provider: msg.sender,
-            poolToken: res.pair,
-            tokenA: res.tokenA,
-            tokenB: res.tokenB,
-            amountA: res.amountA,
-            amountB: res.amountB,
-            depositedA: res.depositedA,
-            depositedB: res.depositedB
-        });
-
-        return PositionMigration({ amountA: res.amountA, amountB: res.amountB });
-    }
-
-    /**
-     * @dev migrates funds from a Uniswap v2/SushiSwap  pair into a bancor v3 pool and returns the deposited amount for
-     * each token in the same order as stored in Uniswap's pair, or 0 for unsupported tokens (unsupported tokens will be
-     * transferred to the caller)
-     *
-     * requirements:
-     *
-     * - the caller must have approved the pair to transfer the liquidity on its behalf
-     */
-    function _migrateUniswapV2Position(
+    function _tradeUniswapV2(
         IUniswapV2Router02 router,
         IUniswapV2Factory factory,
-        Token token0,
-        Token token1,
-        uint256 poolTokenAmount,
-        address provider
-    ) private returns (ArbitrageResult memory) {
+        Token sourceToken,
+        Token targetToken,
+        uint256 sourceTokenAmount,
+        address caller
+    ) private returns (uint256 targetTokenAmount) {
+
+        uint24 fee = 3000;
+        address recipient = address(this);
+        uint160 sqrtPriceLimitX96 = 0;
+
         // arrange tokens in an array, replace WETH with the native token
         Token[2] memory tokens = [
-            _isWETH(token0) ? TokenLibrary.NATIVE_TOKEN : token0,
-            _isWETH(token1) ? TokenLibrary.NATIVE_TOKEN : token1
+            _isWETH(sourceToken) ? TokenLibrary.NATIVE_TOKEN : sourceToken,
+            _isWETH(targetToken) ? TokenLibrary.NATIVE_TOKEN : targetToken
         ];
 
         // get Uniswap's pair
@@ -276,7 +214,10 @@ contract BancorArbitrage is IBancorArbitrage, ReentrancyGuardUpgradeable, Utils,
         }
 
         // transfer the tokens from the caller
-        Token(address(pair)).safeTransferFrom(provider, address(this), poolTokenAmount);
+        Token(address(pair)).safeTransferFrom(caller, address(this), sourceTokenAmount);
+
+        // save states
+        uint256[2] memory previousBalances = [tokens[0].balanceOf(address(this)), tokens[1].balanceOf(address(this))];
 
         // look for relevant whitelisted pools, revert if there are none
         bool[2] memory whitelist;
@@ -288,96 +229,51 @@ contract BancorArbitrage is IBancorArbitrage, ReentrancyGuardUpgradeable, Utils,
             revert UnsupportedTokens();
         }
 
-        // save states
-        uint256[2] memory previousBalances = [tokens[0].balanceOf(address(this)), tokens[1].balanceOf(address(this))];
+        // trade on UniswapV2
+        _uniV2Swap(router, pair, tokens, sourceTokenAmount, fee, recipient, sqrtPriceLimitX96);
 
-        // remove liquidity from Uniswap
-        _uniV2RemoveLiquidity(tokens, pair, router, poolTokenAmount);
-
-        // migrate funds
-        uint256[2] memory deposited;
-        for (uint256 i = 0; i < 2; i++) {
-            Token token = tokens[i];
-            uint256 delta = token.balanceOf(address(this)) - previousBalances[i];
-            if (whitelist[i]) {
-                deposited[i] = delta;
-
-                _deposit(token, deposited[i], provider);
-            } else {
-                _transferToProvider(token, delta, provider);
-            }
-        }
-
-        return
-            ArbitrageResult({
-                pair: pair,
-                tokenA: tokens[0],
-                tokenB: tokens[1],
-                depositedA: whitelist[0],
-                depositedB: whitelist[1],
-                amountA: deposited[0],
-                amountB: deposited[1]
-            });
+        // calculate the amount of target tokens received
+        uint256 targetTokenAmount = tokens[1].balanceOf(address(this)) - previousBalances[1];
+        return targetTokenAmount;
     }
 
-    /**
-     * @dev deposits given amount into a pool of given token
-     */
-    function _deposit(
-        Token token,
-        uint256 amount,
-        address provider
-    ) private {
-        if (token.isNative()) {
-            _network.depositFor{ value: amount }(provider, token, amount);
-        } else {
-            token.toIERC20().safeApprove(address(_network), amount);
 
-            _network.depositFor(provider, token, amount);
+    /**
+     * @dev removes liquidity from Uniswap's pair, transfer funds to self
+     */
+    function _uniV2Swap(
+        IUniswapV2Router02 router,
+        IUniswapV2Pair pair,
+        Token[2] memory tokens,
+        uint256 sourceTokenAmount,
+        uint24 fee,
+        address recipient,
+        uint160 sqrtPriceLimitX96
+    ) private {
+        IERC20(address(pair)).safeApprove(address(router), sourceTokenAmount);
+        uint256 deadline = block.timestamp + MAX_DEADLINE;
+
+        if (tokens[0].isNative()) {
+            router.swapExactETHForTokens(sourceTokenAmount, 0, address(pair), recipient, deadline);
+        } else if (tokens[1].isNative()) {
+            router.swapExactTokensForETH(sourceTokenAmount, 0, address(pair), recipient, deadline);
+        } else {
+            router.swapExactTokensForTokens(sourceTokenAmount, 0, address(pair), recipient, deadline);
         }
     }
 
     /**
      * @dev transfer given amount of given token to the caller
      */
-    function _transferToProvider(
+    function _transferToCaller(
         Token token,
         uint256 amount,
-        address provider
+        address caller
     ) private {
         if (token.isNative()) {
-            payable(provider).sendValue(amount);
+            payable(caller).sendValue(amount);
         } else {
-            token.toIERC20().safeTransfer(provider, amount);
-        }
-    }
-
-    /**
-     * @dev removes liquidity from Uniswap's pair, transfer funds to self
-     */
-    function _uniV2RemoveLiquidity(
-        Token[2] memory tokens,
-        IUniswapV2Pair pair,
-        IUniswapV2Router02 router,
-        uint256 poolTokenAmount
-    ) private {
-        IERC20(address(pair)).safeApprove(address(router), poolTokenAmount);
-        uint256 deadline = block.timestamp + MAX_DEADLINE;
-
-        if (tokens[0].isNative()) {
-            router.removeLiquidityETH(address(tokens[1]), poolTokenAmount, 1, 1, address(this), deadline);
-        } else if (tokens[1].isNative()) {
-            router.removeLiquidityETH(address(tokens[0]), poolTokenAmount, 1, 1, address(this), deadline);
-        } else {
-            router.removeLiquidity(
-                address(tokens[0]),
-                address(tokens[1]),
-                poolTokenAmount,
-                1,
-                1,
-                address(this),
-                deadline
-            );
+            token.toIERC20().safeTransfer(caller, amount);
         }
     }
 
@@ -390,10 +286,10 @@ contract BancorArbitrage is IBancorArbitrage, ReentrancyGuardUpgradeable, Utils,
         returns (IUniswapV2Pair)
     {
         // Uniswap does not support ETH input, transform to WETH if necessary
-        address token0Address = tokens[0].isNative() ? address(_weth) : address(tokens[0]);
-        address token1Address = tokens[1].isNative() ? address(_weth) : address(tokens[1]);
+        address sourceTokenAddress = tokens[0].isNative() ? address(_weth) : address(tokens[0]);
+        address targetTokenAddress = tokens[1].isNative() ? address(_weth) : address(tokens[1]);
 
-        address pairAddress = factory.getPair(token0Address, token1Address);
+        address pairAddress = factory.getPair(sourceTokenAddress, targetTokenAddress);
         return IUniswapV2Pair(pairAddress);
     }
 
@@ -402,5 +298,45 @@ contract BancorArbitrage is IBancorArbitrage, ReentrancyGuardUpgradeable, Utils,
      */
     function _isWETH(Token token) private view returns (bool) {
         return address(token) == address(_weth);
+    }
+
+    /**
+     * @dev executes the arbitrage trade
+     */
+    function execute(tradeParams[] memory _trades) external payable returns (uint256) {
+
+        bool isFirstValid = _trades[0].sourceToken.isEqual(_bnt);
+        require(isFirstValid, "First trade source token must be BNT");
+
+        bool isLastValid = _trades[_trades.length - 1].targetToken.isEqual(_bnt);
+        require(isLastValid, "Last trade target token must be BNT");
+
+        // perform the trades
+        for (uint i=0; i< _trades.length; i++) {
+            Token sourceToken = _trades[i].sourceToken;
+            Token targetToken = _trades[i].targetToken;
+            uint256 sourceAmount = _trades[i].sourceAmount;
+            uint256 minReturnAmount = _trades[i].minReturnAmount;
+            uint256 deadline = _trades[i].deadline;
+            uint exchangeId = _trades[i].exchangeId;
+
+            if (exchangeId == 0) {
+                uint256 res = tradeBancorV3(sourceToken, targetToken, sourceAmount, minReturnAmount, deadline, address(this));
+            } else if (exchangeId == 1) {
+                uint256 res = tradeSushiSwap(sourceToken, targetToken, sourceAmount, minReturnAmount, deadline, address(this));
+            } else if (exchangeId == 2) {
+                uint256 res = tradeUniswapV2(sourceToken, targetToken, sourceAmount, minReturnAmount, deadline, address(this));
+            } else if (exchangeId == 3) {
+                uint256 res = tradeUniswapV3(sourceToken, targetToken, sourceAmount, minReturnAmount, deadline, address(this));
+            } else {
+                revert("invalid exchangeId");
+            }
+
+            if (i == _trades.length - 1) {
+                uint256 profit = res - _trades[0].sourceAmount;
+                _transferToCaller(targetToken, res, msg.sender);
+            }
+        }
+        return profit;
     }
 }
