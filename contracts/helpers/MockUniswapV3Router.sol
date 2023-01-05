@@ -12,7 +12,7 @@ import { Utils } from "../utility/Utils.sol";
 
 import { MockUniswapV3Pool } from "./MockUniswapV3Pool.sol";
 
-contract MockUniswapV3Factory is Utils {
+contract MockUniswapV3Router is Utils {
     using SafeERC20 for IERC20;
     using EnumerableSet for EnumerableSet.AddressSet;
 

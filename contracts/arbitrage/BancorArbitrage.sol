@@ -22,15 +22,14 @@ import { Utils } from "../utility/Utils.sol";
 import { IBancorNetwork, IFlashLoanRecipient } from "../network/interfaces/IBancorNetwork.sol";
 import { INetworkSettings } from "../network/interfaces/INetworkSettings.sol";
 import { IPoolToken } from "../pools/interfaces/IPoolToken.sol";
-
 import { ISwapRouter } from "@uniswap/v3-periphery/contracts/interfaces/ISwapRouter.sol";
-
 import { IBNTPool } from "../pools/interfaces/IBNTPool.sol";
 
 error InvalidTokenFirst();
 error InvalidTokenLast();
 
-struct tradeParams {
+// Defines the trade parameters.
+struct TradeParams {
     Token sourceToken;
     Token targetToken;
     uint256 sourceAmount;
@@ -39,17 +38,18 @@ struct tradeParams {
     uint exchangeId;
 }
 
-struct ArbitrageSettings {
+// Defines the contract rewards configurable parameters.
+struct ArbitrageRewards {
     // the percentage of arbitrage profits to be sent to the initiator of the arbitrage event (in units of PPM)
     uint32 arbitrageProfitPercentagePPM;
     // the maximum arbitrage profit to be sent to the initiator of the arbitrage event
     uint256 arbitrageProfitMaxAmount;
 }
 
+//This interface supports Uniswap V3 trades.
 interface IUniswapV3Router is ISwapRouter {
     function refundETH() external payable;
 }
-
 
 /**
  * @dev BancorArbitrage contract
@@ -71,7 +71,7 @@ contract BancorArbitrage is ReentrancyGuardUpgradeable, Utils, Upgradeable {
     INetworkSettings private immutable _networkSettings;
 
     // the settings for the ArbitrageProfits
-    ArbitrageSettings private _arbitrageSettings;
+    ArbitrageRewards private _arbitrageRewards;
 
     // the bnt contract
     IERC20 private immutable _bnt;
@@ -98,7 +98,7 @@ contract BancorArbitrage is ReentrancyGuardUpgradeable, Utils, Upgradeable {
     IERC20 private immutable _weth;
 
     // upgrade forward-compatibility storage gap
-    uint256[MAX_GAP - 0] private __gap;
+    uint256[MAX_GAP] private __gap;
 
     /**
      * @dev triggered after a successful Uniswap V2 Arbitrage Closed
@@ -159,7 +159,7 @@ contract BancorArbitrage is ReentrancyGuardUpgradeable, Utils, Upgradeable {
         _sushiSwapRouter = initSushiSwapRouter;
         _sushiSwapFactory = initSushiSwapFactory;
         _weth = IERC20(initUniswapV2Router.WETH());
-        _arbitrageSettings = ArbitrageSettings({
+        _arbitrageRewards = ArbitrageRewards({
             arbitrageProfitPercentagePPM: 10,
             arbitrageProfitMaxAmount: 100
         });
@@ -204,8 +204,8 @@ contract BancorArbitrage is ReentrancyGuardUpgradeable, Utils, Upgradeable {
     /**
      * @dev gets the arbitrage settings
      */
-    function getSettings() external view returns (ArbitrageSettings memory) {
-        return _arbitrageSettings;
+    function getSettings() external view returns (ArbitrageRewards memory) {
+        return _arbitrageRewards;
     }
 
     /**
@@ -216,15 +216,15 @@ contract BancorArbitrage is ReentrancyGuardUpgradeable, Utils, Upgradeable {
      * - the caller must be the admin of the contract
      */
     function setArbitrageSettings(
-        ArbitrageSettings calldata settings
+        ArbitrageRewards calldata settings
     )
     external
     onlyAdmin
     validFee(settings.arbitrageProfitPercentagePPM)
     greaterThanZero(settings.arbitrageProfitMaxAmount)
     {
-        uint32 prevArbitrageProfitPercentagePPM = _arbitrageSettings.arbitrageProfitPercentagePPM;
-        uint256 prevArbitrageProfitMaxAmount = _arbitrageSettings.arbitrageProfitMaxAmount;
+        uint32 prevArbitrageProfitPercentagePPM = _arbitrageRewards.arbitrageProfitPercentagePPM;
+        uint256 prevArbitrageProfitMaxAmount = _arbitrageRewards.arbitrageProfitMaxAmount;
 
         if (
             prevArbitrageProfitPercentagePPM == settings.arbitrageProfitPercentagePPM &&
@@ -233,7 +233,7 @@ contract BancorArbitrage is ReentrancyGuardUpgradeable, Utils, Upgradeable {
             return;
         }
 
-        _arbitrageSettings = settings;
+        _arbitrageRewards = settings;
 
         emit ArbitrageSettingsUpdated({
         prevProfitPercentagePPM: prevArbitrageProfitPercentagePPM,
@@ -440,7 +440,7 @@ contract BancorArbitrage is ReentrancyGuardUpgradeable, Utils, Upgradeable {
     /**
      * @dev executes the arbitrage trade
      */
-    function execute(tradeParams[] memory _trades, ArbitrageSettings memory settings) external payable {
+    function execute(TradeParams[] memory _trades, ArbitrageRewards memory settings) external payable {
 
         // get the settings for the current transaction
         uint256 burnAmount = 0;

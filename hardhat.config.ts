@@ -85,19 +85,19 @@ const config: HardhatUserConfig = {
             saveDeployments: false,
             live: false
         },
-        [DeploymentNetwork.Mainnet]: {
-            chainId: 1,
-            url: ETHEREUM_PROVIDER_URL,
-            gasPrice,
-            saveDeployments: true,
-            live: true
-        },
-        [DeploymentNetwork.Rinkeby]: {
-            chainId: 4,
-            url: ETHEREUM_RINKEBY_PROVIDER_URL,
-            saveDeployments: true,
-            live: true
-        },
+//        [DeploymentNetwork.Mainnet]: {
+//            chainId: 1,
+//            url: ETHEREUM_PROVIDER_URL,
+//            gasPrice,
+//            saveDeployments: true,
+//            live: true
+//        },
+//        [DeploymentNetwork.Rinkeby]: {
+//            chainId: 4,
+//            url: ETHEREUM_RINKEBY_PROVIDER_URL,
+//            saveDeployments: true,
+//            live: true
+//        },
         [DeploymentNetwork.Tenderly]: {
             chainId: 1,
             url: `https://rpc.tenderly.co/fork/${TENDERLY_FORK_ID}`,
