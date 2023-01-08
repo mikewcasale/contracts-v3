@@ -46,9 +46,25 @@ struct ArbitrageRewards {
     uint256 arbitrageProfitMaxAmount;
 }
 
-//This interface supports Uniswap V3 trades.
+//The interface supports Uniswap V3 trades.
 interface IUniswapV3Router is ISwapRouter {
     function refundETH() external payable;
+}
+
+//The interface supports Bancor V2 trades.
+interface IBancorNetworkV2 {
+    function convertByPath(
+        address[] memory _path,
+        uint256 _amount,
+        uint256 _minReturn,
+        address _beneficiary,
+        address _affiliateAccount,
+        uint256 _affiliateFee
+    ) external payable returns (uint256);
+    function rateByPath(
+        address[] memory _path,
+        uint256 _amount
+    ) external view returns (uint256);
 }
 
 /**
@@ -64,8 +80,11 @@ contract BancorArbitrage is ReentrancyGuardUpgradeable, Utils, Upgradeable {
 
     uint32 private constant MAX_DEADLINE = 10000;
 
+    // the Bancor v2 network contract
+    IBancorNetworkV2 private immutable _bancorNetworkV2;
+
     // the network contract
-    IBancorNetwork private immutable _network;
+    IBancorNetwork private immutable _bancorNetworkV3;
 
     // the network settings contract
     INetworkSettings private immutable _networkSettings;
@@ -132,6 +151,7 @@ contract BancorArbitrage is ReentrancyGuardUpgradeable, Utils, Upgradeable {
      * @dev a "virtual" constructor that is only used to set immutable state variables
      */
     constructor(
+        IBancorNetworkV2 initBancorNetworkV2,
         IBancorNetwork initNetwork,
         INetworkSettings initNetworkSettings,
         IERC20 initBnt,
@@ -141,6 +161,7 @@ contract BancorArbitrage is ReentrancyGuardUpgradeable, Utils, Upgradeable {
         IUniswapV2Router02 initSushiSwapRouter,
         IUniswapV2Factory initSushiSwapFactory
     )
+        validAddress(address(IBancorNetworkV2))
         validAddress(address(initNetwork))
         validAddress(address(initNetworkSettings))
         validAddress(address(initBnt))
@@ -150,7 +171,8 @@ contract BancorArbitrage is ReentrancyGuardUpgradeable, Utils, Upgradeable {
         validAddress(address(initSushiSwapRouter))
         validAddress(address(initSushiSwapFactory))
     {
-        _network = initNetwork;
+        _bancorNetworkV2 = initBancorNetworkV2;
+        _bancorNetworkV3 = initNetwork;
         _networkSettings = initNetworkSettings;
         _bnt = initBnt;
         _uniswapV3Router = initUniswapV3Router;
@@ -247,7 +269,30 @@ contract BancorArbitrage is ReentrancyGuardUpgradeable, Utils, Upgradeable {
      * @dev takes a flash loan to perform the arbitrage trade
      */
     function takeFlashLoan(uint256 _amount) private {
-        _network.flashLoan(Token(address(_bnt)), _amount, IFlashLoanRecipient(address(this)), "0x");
+        _bancorNetworkV3.flashLoan(Token(address(_bnt)), _amount, IFlashLoanRecipient(address(this)), "0x");
+    }
+
+    function tradeBancorV3(
+        Token sourceToken,
+        Token targetToken,
+        uint256 sourceTokenAmount,
+        uint256 minTargetTokenAmount,
+        uint256 minReturn,
+        uint256 deadline,
+        address caller
+    )
+        public
+        returns (uint256)
+    {
+        return _tradeBancorV3(
+            sourceToken,
+            targetToken,
+            sourceTokenAmount,
+            minTargetTokenAmount,
+            minReturn,
+            deadline,
+            caller
+        );
     }
 
     /**
@@ -265,7 +310,7 @@ contract BancorArbitrage is ReentrancyGuardUpgradeable, Utils, Upgradeable {
         private
         returns (uint256)
     {
-        return _network.tradeBySourceAmount(
+        return _bancorNetworkV3.tradeBySourceAmount(
             sourceToken,
             targetToken,
             sourceTokenAmount,
@@ -273,6 +318,42 @@ contract BancorArbitrage is ReentrancyGuardUpgradeable, Utils, Upgradeable {
             deadline,
             address(this)
         );
+    }
+
+    /**
+     * @dev performs the arbitrage trade on Bancor V2
+     */
+    function tradeBancorV2(
+        address sourceTokenAddress,
+        address poolAddress,
+        address targetTokenAddress,
+        uint256 amountIn,
+        uint256 amountOutMin
+    ) public returns (uint256) {
+        return _tradeBancorV2(
+            sourceTokenAddress,
+            poolAddress,
+            targetTokenAddress,
+            amountIn,
+            amountOutMin
+        );
+    }
+
+    /**
+     * @dev performs the arbitrage trade on Bancor V2
+     */
+    function _tradeBancorV2(
+        address sourceTokenAddress,
+        address poolAddress,
+        address targetTokenAddress,
+        uint256 amountIn,
+        uint256 amountOutMin
+    ) private returns (uint256) {
+        address[] memory path = new address[](3);
+        path[0] = sourceTokenAddress;
+        path[1] = poolAddress;
+        path[2] = targetTokenAddress;
+        return bancorNetworkV2.convertByPath{value: msg.value}(path, amountIn, amountOutMin, address(0), address(0), 0);
     }
 
     /**
@@ -510,6 +591,15 @@ contract BancorArbitrage is ReentrancyGuardUpgradeable, Utils, Upgradeable {
                     0,
                     minReturnAmount,
                     deadline
+                );
+            } else if (exchangeId == 4) {
+                // Bancor IBancorNetworkV2
+                res = _tradeBancorV2(
+                    sourceTokenAddress,
+                    poolAddress,
+                    targetTokenAddress,
+                    amountIn,
+                    amountOutMin
                 );
             } else {
                 revert("invalid exchangeId");
