@@ -2,14 +2,7 @@ import Contracts, {
     BancorNetworkInfo,
     BancorArbitrage,
     IERC20,
-    MockBancorNetworkV2,
-    MockBancorNetworkV3,
     MockExchanges,
-    MockuniswapV2RouterFactory,
-    MockuniswapV2RouterPair,
-    MockuniswapV2RouterRouter02,
-    MockuniswapV3RouterRouter,
-    MockuniswapV3RouterPool,
     NetworkSettings,
     PoolToken,
     TestBancorNetwork,
@@ -78,12 +71,12 @@ describe('BancorArbitrage', () => {
     const MIN_LIQUIDITY_FOR_TRADING = toWei(1000);
 
     type TradeParams = {
-        sourceToken: Token;
-        targetToken: Token;
-        sourceAmount: uint256;
-        minReturnAmount: uint256;
-        deadline: uint256;
-        exchangeId: uint256;
+        sourceToken: TokenWithAddress;
+        targetToken: TokenWithAddress;
+        sourceAmount: BigNumber;
+        minReturnAmount: BigNumber;
+        deadline: BigNumber;
+        exchangeId: BigNumber;
     };
 
     const AMOUNT = 1000;
@@ -95,7 +88,7 @@ describe('BancorArbitrage', () => {
     });
 
     beforeEach(async () => {
-        ({ network, networkSettings, baseToken, bnt, poolCollection, networkInfo, bntPoolToken } = await createSystem());
+        ({ network, networkSettings, bnt, poolCollection, networkInfo, bntPoolToken } = await createSystem());
 
         baseToken = await createTestToken();
         exchanges = bancorV2 = bancorV3 = uniswapV2Router = uniswapV2Factory = uniswapV3Router = sushiSwap = await Contracts.MockExchanges.deploy(
@@ -528,7 +521,7 @@ describe('BancorArbitrage', () => {
         expect(newBalances[token1.address].eq(previousBalances[token1.address].add(AMOUNT))).to.be.true;
     };
 
-    const testTradeMultiRoute = async (routes) => {
+    const testTradeMultiRoute = async (routes: any) => {
         let allBalances = 0;
 
         for (let i = 0; i < routes.length; i++)
