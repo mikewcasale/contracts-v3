@@ -21,7 +21,7 @@ interface EnvOptions {
     ETHEREUM_PROVIDER_URL?: string;
     ETHEREUM_RINKEBY_PROVIDER_URL?: string;
     ETHERSCAN_API_KEY?: string;
-    GAS_PRICE?: number | 'auto';
+    GAS_PRICE?: number;
     NIGHTLY?: boolean;
     PROFILE?: boolean;
     TENDERLY_FORK_ID?: string;
@@ -34,7 +34,7 @@ const {
     ETHEREUM_PROVIDER_URL = '',
     ETHEREUM_RINKEBY_PROVIDER_URL = '',
     ETHERSCAN_API_KEY,
-    GAS_PRICE: gasPrice = 'auto',
+    GAS_PRICE,
     NIGHTLY: isNightly,
     PROFILE: isProfiling,
     TENDERLY_FORK_ID = '',
@@ -83,7 +83,8 @@ const config: HardhatUserConfig = {
             },
             allowUnlimitedContractSize: true,
             saveDeployments: false,
-            live: false
+            live: false,
+            gas: 12000000,
         },
 //        [DeploymentNetwork.Mainnet]: {
 //            chainId: 1,
@@ -121,6 +122,23 @@ const config: HardhatUserConfig = {
         compilers: [
             {
                 version: '0.8.13',
+                settings: {
+                    optimizer: {
+                        enabled: true,
+                        runs: 200
+                    },
+                    metadata: {
+                        bytecodeHash: 'none'
+                    },
+                    outputSelection: {
+                        '*': {
+                            '*': ['storageLayout'] // Enable slots, offsets and types of the contract's state variables
+                        }
+                    }
+                }
+            },
+            {
+                version: '0.6.12',
                 settings: {
                     optimizer: {
                         enabled: true,

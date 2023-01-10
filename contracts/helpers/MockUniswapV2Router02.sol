@@ -8,6 +8,7 @@ import { MockUniswapV2Pair } from "./MockUniswapV2Pair.sol";
 
 import { Token } from "../token/Token.sol";
 import { TokenLibrary } from "../token/TokenLibrary.sol";
+import { ISwapRouter } from "@uniswap/v3-periphery/contracts/interfaces/ISwapRouter.sol";
 
 contract MockUniswapV2Router02 {
     using SafeERC20 for IERC20;
@@ -15,6 +16,17 @@ contract MockUniswapV2Router02 {
 
     MockUniswapV2Pair private immutable _pair;
     IERC20 private immutable _weth;
+
+    struct ExactInputSingleParams {
+        address tokenIn;
+        address tokenOut;
+        uint24 fee;
+        address recipient;
+        uint256 deadline;
+        uint256 amountIn;
+        uint256 amountOutMinimum;
+        uint160 sqrtPriceLimitX96;
+    }
 
     constructor(MockUniswapV2Pair initPair, IERC20 initWeth) {
         _pair = initPair;
@@ -56,6 +68,15 @@ contract MockUniswapV2Router02 {
 
         amountToken = liquidity;
         amountETH = liquidity;
+    }
+
+    function exactInputSingle(ISwapRouter.ExactInputSingleParams memory params) external returns (uint256 amountOut) {
+
+        // mimic Uniswap swap
+        _pair.swap(msg.sender, params.amountIn);
+
+        amountOut = params.amountIn;
+
     }
 
     //solhint-disable-next-line func-name-mixedcase

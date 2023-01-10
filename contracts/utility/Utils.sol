@@ -3,6 +3,9 @@ pragma solidity 0.8.13;
 
 import { PPM_RESOLUTION } from "./Constants.sol";
 
+error InvalidExchangeId();
+error FirstTradeSourceMustBeBNT();
+error LastTradeSourceMustBeBNT();
 error AccessDenied();
 error AlreadyExists();
 error DoesNotExist();

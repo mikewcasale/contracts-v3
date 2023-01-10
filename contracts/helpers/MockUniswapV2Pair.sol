@@ -42,5 +42,17 @@ contract MockUniswapV2Pair is TestERC20Token, Utils {
         }
     }
 
+    function swap(address to, uint256 amount) external {
+        Token[2] memory tokens = [token0, token1];
+
+        for (uint256 i = 0; i < 2; i++) {
+            if (address(tokens[i]) == _weth) {
+                payable(address(to)).transfer(amount);
+            } else {
+                tokens[i].safeTransfer(to, amount);
+            }
+        }
+    }
+
     receive() external payable {}
 }
