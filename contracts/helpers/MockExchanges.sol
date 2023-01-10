@@ -5,64 +5,45 @@ import { IERC20 } from '@openzeppelin/contracts/token/ERC20/IERC20.sol';
 import { SafeERC20 } from '@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol';
 import { EnumerableSet } from '@openzeppelin/contracts/utils/structs/EnumerableSet.sol';
 
+import { ISwapRouter } from '@uniswap/v3-periphery/contracts/interfaces/ISwapRouter.sol';
+import { MockUniswapV2Pair } from './MockUniswapV2Pair.sol';
+
 import { Token } from '../token/Token.sol';
 import { TokenLibrary } from '../token/TokenLibrary.sol';
 
 import { Utils } from '../utility/Utils.sol';
-import { TestERC20Token } from './TestERC20Token.sol';
-import { ISwapRouter } from '@uniswap/v3-periphery/contracts/interfaces/ISwapRouter.sol';
-import { TestFlashLoanRecipient } from './TestIFlashLoanRecipient.sol';
-
 import { IBancorNetwork, IFlashLoanRecipient } from '../network/interfaces/IBancorNetwork.sol';
 
-struct ExactInputSingleParams {
-	address tokenIn;
-	address tokenOut;
-	uint24 fee;
-	address recipient;
-	uint256 deadline;
-	uint256 amountIn;
-	uint256 amountOutMinimum;
-	uint160 sqrtPriceLimitX96;
-}
+import { TestERC20Token } from './TestERC20Token.sol';
+import { TestFlashLoanRecipient } from './TestIFlashLoanRecipient.sol';
 
 contract MockExchanges is TestERC20Token, Utils {
 	using SafeERC20 for IERC20;
 	using TokenLibrary for Token;
+	using EnumerableSet for EnumerableSet.AddressSet;
 
 	Token public token0;
 	Token public token1;
-	Token public token2;
-	Token public route0;
-	Token public route1;
-	Token public route2;
-	uint256 routeNumber = 0;
 
-	IBancorNetwork private immutable _network;
-	address private immutable _baseToken;
+	MockUniswapV2Pair private immutable _weth;
+	EnumerableSet.AddressSet private _tokens;
 
-	constructor(
-		uint256 totalSupply,
-		address baseToken,
-		IBancorNetwork initNetwork
-	) TestERC20Token('MultiExchange', 'MULTI', totalSupply) {
-		_baseToken = baseToken;
-		_network = initNetwork;
+	constructor(uint256 totalSupply, MockUniswapV2Pair weth) TestERC20Token('MultiExchange', 'MULTI', totalSupply) {
+		_weth = weth;
 	}
 
 	/**
 	 * Bancor V3
 	 * @dev takes a flash loan to perform the arbitrage trade
 	 */
-	function takeFlashLoan(uint256 _amount) public {
-		//        TestFlashLoanRecipient flashLoanRecipient = new TestFlashLoanRecipient(_network);
-		_network.flashLoan(Token(address(_baseToken)), _amount, IFlashLoanRecipient(address(this)), '0x');
+	function flashLoan(Token token, uint256 amount, IFlashLoanRecipient recipient, bytes calldata data) external {
+		token.safeTransfer(msg.sender, amount);
 	}
 
 	function swap(address to, uint256 amount) public payable returns (uint) {
 		Token[2] memory tokens = [token0, token1];
 		for (uint256 i = 0; i < 2; i++) {
-			if (address(tokens[i]) == _baseToken) {
+			if (address(tokens[i]) == address(_weth)) {
 				payable(address(to)).transfer(amount);
 			} else {
 				tokens[i].safeTransfer(to, amount);
@@ -170,24 +151,22 @@ contract MockExchanges is TestERC20Token, Utils {
 
 	//solhint-disable-next-line func-name-mixedcase
 	function WETH() external view returns (address) {
-		return address(_baseToken);
+		return address(_weth);
 	}
 
 	receive() external payable {}
 
+	function getPair(address token0, address token1) external view returns (address) {
+		if (_tokens.contains(token0) && _tokens.contains(token1)) {
+			return address(_weth);
+		}
+		return address(0);
+	}
+
 	function setTokens(Token _token0, Token _token1) external {
 		token0 = _token0;
 		token1 = _token1;
+		_tokens.add(address(token0));
+		_tokens.add(address(token1));
 	}
-
-	//    function nextRoute() external {
-	//        routeNumber = routeNumber + 1;
-	//        if (routeNumber == 1) {
-	//            token0 = route1;
-	//            token1 = route2;
-	//        } else if (routeNumber == 2) {
-	//            route0 = token1;
-	//            route1 = token0;
-	//        }
-	//    }
 }

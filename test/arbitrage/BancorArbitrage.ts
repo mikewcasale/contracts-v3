@@ -99,7 +99,7 @@ describe('BancorArbitrage', () => {
 			uniswapV2Factory =
 			uniswapV3Router =
 			sushiSwap =
-				await Contracts.MockExchanges.deploy(100_000_000, baseToken.address, network.address);
+				await Contracts.MockExchanges.deploy(100_000_000, baseToken.address);
 
 		bancorArbitrage = await createProxy(Contracts.BancorArbitrage, {
 			ctorArgs: [
@@ -239,37 +239,19 @@ describe('BancorArbitrage', () => {
 			await exchanges.connect(user).approve(bancorArbitrage.address, MAX_SOURCE_AMOUNT);
 		});
 
-		it('should trade on Uniswap V3', async () => {
-			const { poolToken: poolToken1, token: sourceToken } = await preparePoolAndToken(TokenSymbol.TKN1);
-			const { poolToken: poolToken2, token: targetToken } = await preparePoolAndToken(TokenSymbol.TKN2);
-			await exchanges.setTokens(sourceToken.address, targetToken.address);
-			let exchangeId = 2;
-			await testTrade(sourceToken, targetToken, exchangeId);
-		});
+		let exchangeNames = ['BancorV3', 'SushiSwap', 'UniswapV2', 'UniswapV3', 'BancorV2'];
+		let baseMsg = 'should trade on ';
+		for (let i = 0; i < exchangeNames.length; i++) {
+			let exchangeName = exchangeNames[i];
+			let testMsg = baseMsg.concat(exchangeName.toString());
 
-		it('should trade on Bancor V2', async () => {
-			const { poolToken: poolToken1, token: sourceToken } = await preparePoolAndToken(TokenSymbol.TKN1);
-			const { poolToken: poolToken2, token: targetToken } = await preparePoolAndToken(TokenSymbol.TKN2);
-			await exchanges.setTokens(sourceToken.address, targetToken.address);
-			let exchangeId = 1;
-			await testTrade(sourceToken, targetToken, exchangeId);
-		});
-
-		it('should trade on Bancor V3', async () => {
-			const { poolToken: poolToken1, token: sourceToken } = await preparePoolAndToken(TokenSymbol.TKN1);
-			const { poolToken: poolToken2, token: targetToken } = await preparePoolAndToken(TokenSymbol.TKN2);
-			await exchanges.setTokens(sourceToken.address, targetToken.address);
-			let exchangeId = 3;
-			await testTrade(sourceToken, targetToken, exchangeId);
-		});
-
-		it('should trade on SushiSwap', async () => {
-			const { poolToken: poolToken1, token: sourceToken } = await preparePoolAndToken(TokenSymbol.TKN1);
-			const { poolToken: poolToken2, token: targetToken } = await preparePoolAndToken(TokenSymbol.TKN2);
-			await exchanges.setTokens(sourceToken.address, targetToken.address);
-			let exchangeId = 4;
-			await testTrade(sourceToken, targetToken, exchangeId);
-		});
+			it(testMsg, async () => {
+				const { poolToken: poolToken1, token: sourceToken } = await preparePoolAndToken(TokenSymbol.TKN1);
+				const { poolToken: poolToken2, token: targetToken } = await preparePoolAndToken(TokenSymbol.TKN2);
+				await exchanges.setTokens(sourceToken.address, targetToken.address);
+				await testTrade(sourceToken, targetToken, i);
+			});
+		}
 
 		it('should revert when first trade source token is not BNT', async () => {
 			const { poolToken: poolToken3, token: token3 } = await preparePoolAndToken(TokenSymbol.TKN);
@@ -448,29 +430,7 @@ describe('BancorArbitrage', () => {
 		const previousBalances = await getBalances([token1, token2], bancorArbitrage.address);
 
 		// execute
-		if (exchangeId == 1) {
-			// execute BancorV2 trade
-			const res = await bancorArbitrage
-				.connect(user)
-				.testTradeBancorV2(token1.address, token2.address, AMOUNT, MIN_RETURN_AMOUNT, {
-					gasLimit: GAS_LIMIT
-				});
-		} else if (exchangeId == 2) {
-			// execute uniswapV3Router trade
-			const res = await bancorArbitrage
-				.connect(user)
-				.testTradeUniswapV3(
-					token1.address,
-					token2.address,
-					AMOUNT,
-					MIN_RETURN_AMOUNT,
-					MIN_RETURN_AMOUNT,
-					DEADLINE,
-					{
-						gasLimit: GAS_LIMIT
-					}
-				);
-		} else if (exchangeId == 3) {
+		if (exchangeId == 0) {
 			// execute BancorV3 trade
 			const res = await bancorArbitrage
 				.connect(user)
@@ -485,7 +445,7 @@ describe('BancorArbitrage', () => {
 						gasLimit: GAS_LIMIT
 					}
 				);
-		} else if (exchangeId == 4) {
+		} else if (exchangeId == 1) {
 			// execute Sushi trade
 			const res = await bancorArbitrage
 				.connect(user)
@@ -500,11 +460,39 @@ describe('BancorArbitrage', () => {
 						gasLimit: GAS_LIMIT
 					}
 				);
+		} else if (exchangeId == 2) {
+			// execute uniswap V2 trade
+			const res = await bancorArbitrage
+				.connect(user)
+				.testTradeUniswapV2(token1.address, token2.address, AMOUNT, user.address, {
+					gasLimit: GAS_LIMIT
+				});
+		} else if (exchangeId == 3) {
+			// execute uniswapV3 trade
+			const res = await bancorArbitrage
+				.connect(user)
+				.testTradeUniswapV3(
+					token1.address,
+					token2.address,
+					AMOUNT,
+					MIN_RETURN_AMOUNT,
+					MIN_RETURN_AMOUNT,
+					DEADLINE,
+					{
+						gasLimit: GAS_LIMIT
+					}
+				);
+		} else if (exchangeId == 4) {
+			// execute BancorV2 trade
+			const res = await bancorArbitrage
+				.connect(user)
+				.testTradeBancorV2(token1.address, token2.address, AMOUNT, MIN_RETURN_AMOUNT, {
+					gasLimit: GAS_LIMIT
+				});
 		}
 
 		// assert
 		const newBalances = await getBalances([token1, token2], bancorArbitrage.address);
-
 		expect(newBalances[token1.address].eq(previousBalances[token1.address].add(AMOUNT))).to.be.true;
 	};
 
@@ -532,7 +520,6 @@ describe('BancorArbitrage', () => {
 		const token1 = routes[0].sourceToken;
 		const previousBalances = await getBalances([token1], exchanges.address);
 		const userBalances1 = await getBalances([token1], user.address);
-		console.log('userBalances1: ' + userBalances1[token1.address].toString());
 
 		const res = await bancorArbitrage.connect(user).execute({
 			gasLimit: GAS_LIMIT * 2
@@ -541,8 +528,7 @@ describe('BancorArbitrage', () => {
 		// assert
 		const newBalances = await getBalances([token1], exchanges.address);
 		const userBalances2 = await getBalances([token1], user.address);
-		console.log('userBalances2: ' + userBalances2[token1.address].toString());
-		expect(newBalances[token1.address].eq(previousBalances[token1.address].sub(allBalances))).to.be.true;
+		expect(newBalances[token1.address].eq(previousBalances[token1.address].sub(allBalances + AMOUNT))).to.be.true;
 	};
 
 	const transfer = async (

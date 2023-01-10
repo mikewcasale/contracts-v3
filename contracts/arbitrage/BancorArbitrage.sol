@@ -9,20 +9,19 @@ import { Address } from '@openzeppelin/contracts/utils/Address.sol';
 import { IUniswapV2Pair } from '@uniswap/v2-core/contracts/interfaces/IUniswapV2Pair.sol';
 import { IUniswapV2Factory } from '@uniswap/v2-core/contracts/interfaces/IUniswapV2Factory.sol';
 import { IUniswapV2Router02 } from '@uniswap/v2-periphery/contracts/interfaces/IUniswapV2Router02.sol';
-
-import { IUniswapV3Pool } from '@uniswap/v3-core/contracts/interfaces/IUniswapV3Pool.sol';
-import { IUniswapV3Factory } from '@uniswap/v3-core/contracts/interfaces/IUniswapV3Factory.sol';
+import { ISwapRouter } from '@uniswap/v3-periphery/contracts/interfaces/ISwapRouter.sol';
 
 import { Token } from '../token/Token.sol';
 import { TokenLibrary } from '../token/TokenLibrary.sol';
+
 import { IVersioned } from '../utility/interfaces/IVersioned.sol';
 import { Upgradeable } from '../utility/Upgradeable.sol';
 import { Utils } from '../utility/Utils.sol';
 
 import { IBancorNetwork, IFlashLoanRecipient } from '../network/interfaces/IBancorNetwork.sol';
 import { INetworkSettings } from '../network/interfaces/INetworkSettings.sol';
+
 import { IPoolToken } from '../pools/interfaces/IPoolToken.sol';
-import { ISwapRouter } from '@uniswap/v3-periphery/contracts/interfaces/ISwapRouter.sol';
 import { IBNTPool } from '../pools/interfaces/IBNTPool.sol';
 
 //The interface supports Uniswap V3 trades.
@@ -362,7 +361,7 @@ contract BancorArbitrage is ReentrancyGuardUpgradeable, Utils, Upgradeable {
 	}
 
 	/**
-	 * @dev trades on Uniswap V2
+	 * @dev tratradedes on Uniswap V2
 	 */
 	function _tradeUniswapV2(
 		IUniswapV2Router02 router,
@@ -380,16 +379,6 @@ contract BancorArbitrage is ReentrancyGuardUpgradeable, Utils, Upgradeable {
 
 		// save states
 		uint256[2] memory previousBalances = [tokens[0].balanceOf(address(this)), tokens[1].balanceOf(address(this))];
-
-		// look for relevant whitelisted pools, revert if there are none
-		bool[2] memory whitelist;
-		for (uint256 i = 0; i < 2; i++) {
-			Token token = tokens[i];
-			whitelist[i] = token.isEqual(_bnt) || _networkSettings.isTokenWhitelisted(token);
-		}
-		if (!whitelist[0] && !whitelist[1]) {
-			revert UnsupportedTokens();
-		}
 
 		// trade on UniswapV2
 		IERC20(address(pair)).safeApprove(address(router), sourceTokenAmount);
@@ -414,26 +403,8 @@ contract BancorArbitrage is ReentrancyGuardUpgradeable, Utils, Upgradeable {
 	/**
 	 * @dev transfer given amount of given token to the caller
 	 */
-	function _transferToCaller(Token token, uint256 amount, address caller) private {
-		if (token.isNative()) {
-			payable(caller).sendValue(amount);
-		} else {
-			token.toIERC20().safeTransfer(caller, amount);
-		}
-	}
-
-	/**
-	 * @dev fetches a UniswapV2 pair
-	 */
-	function _getUniswapV2Pair(
-		IUniswapV2Factory factory,
-		Token[2] memory tokens
-	) private view returns (IUniswapV2Pair) {
-		// Uniswap does not support ETH input, transform to WETH if necessary
-		address sourceTokenAddress = tokens[0].isNative() ? address(_weth) : address(tokens[0]);
-		address targetTokenAddress = tokens[1].isNative() ? address(_weth) : address(tokens[1]);
-		address pairAddress = factory.getPair(sourceTokenAddress, targetTokenAddress);
-		return IUniswapV2Pair(pairAddress);
+	function _transferTo(Token token, uint256 amount, address to) private {
+		token.safeTransfer(to, amount);
 	}
 
 	/**
@@ -496,29 +467,40 @@ contract BancorArbitrage is ReentrancyGuardUpgradeable, Utils, Upgradeable {
 	 * @dev trades on Uniswap V2
 	 */
 	function testTradeUniswapV2(
-		IUniswapV2Router02 router,
-		IUniswapV2Factory factory,
 		Token sourceToken,
 		Token targetToken,
 		uint256 sourceAmount,
 		address caller
-	) private returns (uint256 targetTokenAmount) {
+	) public returns (uint256 targetTokenAmount) {
 		// arrange tokens in an array, replace WETH with the native token
 		Token[2] memory tokens = [
 			_isWETH(sourceToken) ? TokenLibrary.NATIVE_TOKEN : sourceToken,
 			_isWETH(targetToken) ? TokenLibrary.NATIVE_TOKEN : targetToken
 		];
 
+		// Uniswap does not support ETH input, transform to WETH if necessary
+		address sourceTokenAddress = tokens[0].isNative() ? address(_weth) : address(tokens[0]);
+		address targetTokenAddress = tokens[1].isNative() ? address(_weth) : address(tokens[1]);
+		address pairAddress = _uniswapV2Factory.getPair(sourceTokenAddress, targetTokenAddress);
+
 		// get Uniswap's pair
-		IUniswapV2Pair pair = _getUniswapV2Pair(_uniswapV2Factory, tokens);
+		IUniswapV2Pair pair = IUniswapV2Pair(pairAddress);
+
 		if (address(pair) == address(0)) {
 			revert NoPairForTokens();
 		}
 
-		// transfer the tokens from the caller
-		Token(address(pair)).safeTransferFrom(msg.sender, address(this), sourceAmount);
-
-		return _tradeUniswapV2(router, factory, sourceToken, targetToken, sourceAmount, caller, tokens, pair);
+		return
+			_tradeUniswapV2(
+				_uniswapV2Router,
+				_uniswapV2Factory,
+				sourceToken,
+				targetToken,
+				sourceAmount,
+				caller,
+				tokens,
+				pair
+			);
 	}
 
 	/**
@@ -591,6 +573,8 @@ contract BancorArbitrage is ReentrancyGuardUpgradeable, Utils, Upgradeable {
 			revert LastTradeTargetMustBeBNT();
 		}
 
+		takeFlashLoan(_trades[0].sourceAmount);
+
 		// perform the trade routes
 		for (uint i = 0; i < _trades.length; i++) {
 			// parse the trade params
@@ -623,14 +607,17 @@ contract BancorArbitrage is ReentrancyGuardUpgradeable, Utils, Upgradeable {
 					_isWETH(targetToken) ? TokenLibrary.NATIVE_TOKEN : targetToken
 				];
 
+				// Uniswap does not support ETH input, transform to WETH if necessary
+				address sourceTokenAddress = tokens[0].isNative() ? address(_weth) : address(tokens[0]);
+				address targetTokenAddress = tokens[1].isNative() ? address(_weth) : address(tokens[1]);
+				address pairAddress = _uniswapV2Factory.getPair(sourceTokenAddress, targetTokenAddress);
+
 				// get Uniswap's pair
-				IUniswapV2Pair pair = _getUniswapV2Pair(_uniswapV2Factory, tokens);
+				IUniswapV2Pair pair = IUniswapV2Pair(pairAddress);
+
 				if (address(pair) == address(0)) {
 					revert NoPairForTokens();
 				}
-
-				// transfer the tokens from the caller
-				Token(address(pair)).safeTransferFrom(msg.sender, address(this), sourceAmount);
 
 				// Uniswap V2
 				res = _tradeUniswapV2(
@@ -678,10 +665,10 @@ contract BancorArbitrage is ReentrancyGuardUpgradeable, Utils, Upgradeable {
 				}
 
 				// transfer the appropriate profit to the caller
-				_transferToCaller(_trades[0].sourceToken, callerProfit, msg.sender);
+				_transferTo(_trades[0].sourceToken, callerProfit, msg.sender);
 
 				// burn the rest
-				_transferToCaller(_trades[0].sourceToken, burnAmount, address(_trades[0].sourceToken));
+				_transferTo(_trades[0].sourceToken, burnAmount, address(_trades[0].sourceToken));
 			}
 
 			emit ArbitrageExecuted(
