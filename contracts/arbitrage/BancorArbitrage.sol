@@ -57,6 +57,44 @@ contract BancorArbitrage is ReentrancyGuardUpgradeable, Utils, Upgradeable {
 	using TokenLibrary for Token;
 	using Address for address payable;
 
+	error UnsupportedTokens();
+	error NoPairForTokens();
+	error InvalidExchangeId();
+	error InvalidTokenFirst();
+	error InvalidTokenLast();
+	error FirstTradeSourceMustBeBNT();
+	error LastTradeTargetMustBeBNT();
+
+	// Defines the trade parameters.
+	struct TradeParams {
+		Token sourceToken;
+		Token targetToken;
+		uint256 sourceAmount;
+		uint256 minReturnAmount;
+		uint256 deadline;
+		uint256 exchangeId;
+	}
+
+	// Defines the arbitrage event to be emitted.
+	struct ArbitrageEvent {
+		address caller;
+		address sourceToken;
+		address targetToken;
+		uint256 sourceTokenAmount;
+		uint256 totalProfit;
+		uint256 callerProfit;
+		uint256 burnAmount;
+	}
+
+	// Defines the contract rewards configurable parameters.
+	struct ArbitrageRewards {
+		uint32 arbitrageProfitPercentagePPM;
+		uint256 arbitrageProfitMaxAmount;
+	}
+
+	// Defines the maximum number of blocks to wait for a transaction to be mined.
+	uint32 private constant MAX_DEADLINE = 10000;
+
 	// the network contract
 	IBancorNetwork private immutable _bancorNetworkV3;
 
@@ -93,33 +131,10 @@ contract BancorArbitrage is ReentrancyGuardUpgradeable, Utils, Upgradeable {
 	// upgrade forward-compatibility storage gap
 	uint256[MAX_GAP] private __gap;
 
-	// Defines the trade parameters.
-	struct TradeParams {
-		Token sourceToken;
-		Token targetToken;
-		uint256 sourceAmount;
-		uint256 minReturnAmount;
-		uint256 deadline;
-		uint256 exchangeId;
-	}
-
-	uint32 private constant MAX_DEADLINE = 10000;
-
 	/**
 	 * @dev triggered after a successful Uniswap V2 Arbitrage Closed
 	 */
-	event ArbitrageExecuted(
-		address indexed caller,
-		address indexed sourceToken,
-		uint256 sourceTokenAmount,
-		uint256 profit
-	);
-	//        Token indexed sourceToken,
-	//        Token indexed targetToken,
-	//        uint256 callerProfit,
-	//        uint256 burnAmount,
-	//        uint256 arbitrageProfitPercentagePPM,
-	//        uint256 arbitrageProfitMaxAmount
+	event ArbitrageExecuted(ArbitrageEvent _event);
 
 	/**
 	 * @dev triggered when the settings of the contract are updated
@@ -130,22 +145,6 @@ contract BancorArbitrage is ReentrancyGuardUpgradeable, Utils, Upgradeable {
 		uint256 prevProfitMaxAmount,
 		uint256 newProfitMaxAmount
 	);
-
-	error UnsupportedTokens();
-	error NoPairForTokens();
-	error InvalidExchangeId();
-	error InvalidTokenFirst();
-	error InvalidTokenLast();
-	error FirstTradeSourceMustBeBNT();
-	error LastTradeTargetMustBeBNT();
-
-	// Defines the contract rewards configurable parameters.
-	struct ArbitrageRewards {
-		// the percentage of arbitrage profits to be sent to the initiator of the arbitrage event (in units of PPM)
-		uint32 arbitrageProfitPercentagePPM;
-		// the maximum arbitrage profit to be sent to the initiator of the arbitrage event
-		uint256 arbitrageProfitMaxAmount;
-	}
 
 	/**
 	 * @dev a "virtual" constructor that is only used to set immutable state variables
@@ -182,13 +181,6 @@ contract BancorArbitrage is ReentrancyGuardUpgradeable, Utils, Upgradeable {
 	}
 
 	/**
-	 * @inheritdoc Upgradeable
-	 */
-	function version() public pure override(Upgradeable) returns (uint16) {
-		return 1;
-	}
-
-	/**
 	 * @dev fully initializes the contract and its parents
 	 */
 	function initialize() external initializer {
@@ -216,6 +208,13 @@ contract BancorArbitrage is ReentrancyGuardUpgradeable, Utils, Upgradeable {
 	 * @dev authorize the contract to receive the native token
 	 */
 	receive() external payable {}
+
+	/**
+	 * @inheritdoc Upgradeable
+	 */
+	function version() public pure override(Upgradeable) returns (uint16) {
+		return 1;
+	}
 
 	/**
 	 * @dev sets the settings of the ArbitrageTrade contract
@@ -371,26 +370,13 @@ contract BancorArbitrage is ReentrancyGuardUpgradeable, Utils, Upgradeable {
 		Token sourceToken,
 		Token targetToken,
 		uint256 sourceTokenAmount,
-		address caller
+		address caller,
+		Token[2] memory tokens,
+		IUniswapV2Pair pair
 	) private returns (uint256 targetTokenAmount) {
 		uint24 fee = 3000;
 		address recipient = address(this);
 		uint160 sqrtPriceLimitX96 = 0;
-
-		// arrange tokens in an array, replace WETH with the native token
-		Token[2] memory tokens = [
-			_isWETH(sourceToken) ? TokenLibrary.NATIVE_TOKEN : sourceToken,
-			_isWETH(targetToken) ? TokenLibrary.NATIVE_TOKEN : targetToken
-		];
-
-		// get Uniswap's pair
-		IUniswapV2Pair pair = _getUniswapV2Pair(factory, tokens);
-		if (address(pair) == address(0)) {
-			revert NoPairForTokens();
-		}
-
-		// transfer the tokens from the caller
-		Token(address(pair)).safeTransferFrom(caller, address(this), sourceTokenAmount);
 
 		// save states
 		uint256[2] memory previousBalances = [tokens[0].balanceOf(address(this)), tokens[1].balanceOf(address(this))];
@@ -458,13 +444,6 @@ contract BancorArbitrage is ReentrancyGuardUpgradeable, Utils, Upgradeable {
 	}
 
 	/**
-	 * @dev gets the arbitrage settings
-	 */
-	function getSettings() internal returns (ArbitrageRewards memory) {
-		return _arbitrageRewards;
-	}
-
-	/**
 	 * @dev adds a new arbitrage trade route
 	 */
 	function addRoute(
@@ -490,15 +469,15 @@ contract BancorArbitrage is ReentrancyGuardUpgradeable, Utils, Upgradeable {
 		uint256 deadline
 	) public returns (uint256) {
 		return
-		_tradeBancorV3(
-			sourceToken,
-			targetToken,
-			sourceTokenAmount,
-			minTargetTokenAmount,
-			minReturn,
-			deadline,
-			address(this)
-		);
+			_tradeBancorV3(
+				sourceToken,
+				targetToken,
+				sourceTokenAmount,
+				minTargetTokenAmount,
+				minReturn,
+				deadline,
+				address(this)
+			);
 	}
 
 	/**
@@ -514,6 +493,35 @@ contract BancorArbitrage is ReentrancyGuardUpgradeable, Utils, Upgradeable {
 	}
 
 	/**
+	 * @dev trades on Uniswap V2
+	 */
+	function testTradeUniswapV2(
+		IUniswapV2Router02 router,
+		IUniswapV2Factory factory,
+		Token sourceToken,
+		Token targetToken,
+		uint256 sourceAmount,
+		address caller
+	) private returns (uint256 targetTokenAmount) {
+		// arrange tokens in an array, replace WETH with the native token
+		Token[2] memory tokens = [
+			_isWETH(sourceToken) ? TokenLibrary.NATIVE_TOKEN : sourceToken,
+			_isWETH(targetToken) ? TokenLibrary.NATIVE_TOKEN : targetToken
+		];
+
+		// get Uniswap's pair
+		IUniswapV2Pair pair = _getUniswapV2Pair(_uniswapV2Factory, tokens);
+		if (address(pair) == address(0)) {
+			revert NoPairForTokens();
+		}
+
+		// transfer the tokens from the caller
+		Token(address(pair)).safeTransferFrom(msg.sender, address(this), sourceAmount);
+
+		return _tradeUniswapV2(router, factory, sourceToken, targetToken, sourceAmount, caller, tokens, pair);
+	}
+
+	/**
 	 * @dev tests the arbitrage trade on Uniswap V3
 	 */
 	function testTradeUniswapV3(
@@ -525,15 +533,15 @@ contract BancorArbitrage is ReentrancyGuardUpgradeable, Utils, Upgradeable {
 		uint256 deadline
 	) public returns (uint256) {
 		return
-		_tradeUniswapV3(
-			_uniswapV3Router,
-			sourceToken,
-			targetToken,
-			sourceAmount,
-			minTargetAmount,
-			minReturnAmount,
-			deadline
-		);
+			_tradeUniswapV3(
+				_uniswapV3Router,
+				sourceToken,
+				targetToken,
+				sourceAmount,
+				minTargetAmount,
+				minReturnAmount,
+				deadline
+			);
 	}
 
 	/**
@@ -548,15 +556,15 @@ contract BancorArbitrage is ReentrancyGuardUpgradeable, Utils, Upgradeable {
 		uint256 deadline
 	) public returns (uint256) {
 		return
-		_tradeSushiSwap(
-			_sushiSwapRouter,
-			sourceToken,
-			targetToken,
-			sourceAmount,
-			minTargetAmount,
-			minReturnAmount,
-			deadline
-		);
+			_tradeSushiSwap(
+				_sushiSwapRouter,
+				sourceToken,
+				targetToken,
+				sourceAmount,
+				minTargetAmount,
+				minReturnAmount,
+				deadline
+			);
 	}
 
 	/**
@@ -609,6 +617,21 @@ contract BancorArbitrage is ReentrancyGuardUpgradeable, Utils, Upgradeable {
 					deadline
 				);
 			} else if (exchangeId == 2) {
+				// arrange tokens in an array, replace WETH with the native token
+				Token[2] memory tokens = [
+					_isWETH(sourceToken) ? TokenLibrary.NATIVE_TOKEN : sourceToken,
+					_isWETH(targetToken) ? TokenLibrary.NATIVE_TOKEN : targetToken
+				];
+
+				// get Uniswap's pair
+				IUniswapV2Pair pair = _getUniswapV2Pair(_uniswapV2Factory, tokens);
+				if (address(pair) == address(0)) {
+					revert NoPairForTokens();
+				}
+
+				// transfer the tokens from the caller
+				Token(address(pair)).safeTransferFrom(msg.sender, address(this), sourceAmount);
+
 				// Uniswap V2
 				res = _tradeUniswapV2(
 					_uniswapV2Router,
@@ -616,7 +639,9 @@ contract BancorArbitrage is ReentrancyGuardUpgradeable, Utils, Upgradeable {
 					sourceToken,
 					targetToken,
 					sourceAmount,
-					address(this)
+					address(this),
+					tokens,
+					pair
 				);
 			} else if (exchangeId == 3) {
 				// Uniswap V3
@@ -659,8 +684,17 @@ contract BancorArbitrage is ReentrancyGuardUpgradeable, Utils, Upgradeable {
 				_transferToCaller(_trades[0].sourceToken, burnAmount, address(_trades[0].sourceToken));
 			}
 
-			// emit the event TODO: Stack too deep error when uncommented
-			emit ArbitrageExecuted(msg.sender, address(_trades[0].sourceToken), _trades[0].sourceAmount, totalProfit);
+			emit ArbitrageExecuted(
+				ArbitrageEvent(
+					address(msg.sender),
+					address(_trades[0].sourceToken),
+					address(_trades[_trades.length - 1].targetToken),
+					sourceAmount,
+					totalProfit,
+					callerProfit,
+					burnAmount
+				)
+			);
 		}
 	}
 }

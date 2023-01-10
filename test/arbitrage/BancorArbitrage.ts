@@ -474,9 +474,17 @@ describe('BancorArbitrage', () => {
 			// execute BancorV3 trade
 			const res = await bancorArbitrage
 				.connect(user)
-				.testTradeBancorV3(token1.address, token2.address, AMOUNT, MIN_RETURN_AMOUNT, MIN_RETURN_AMOUNT, DEADLINE, {
-					gasLimit: GAS_LIMIT
-				});
+				.testTradeBancorV3(
+					token1.address,
+					token2.address,
+					AMOUNT,
+					MIN_RETURN_AMOUNT,
+					MIN_RETURN_AMOUNT,
+					DEADLINE,
+					{
+						gasLimit: GAS_LIMIT
+					}
+				);
 		} else if (exchangeId == 4) {
 			// execute Sushi trade
 			const res = await bancorArbitrage
