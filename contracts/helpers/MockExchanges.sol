@@ -37,7 +37,8 @@ contract MockExchanges is TestERC20Token, Utils {
 	 * @dev takes a flash loan to perform the arbitrage trade
 	 */
 	function flashLoan(Token token, uint256 amount, IFlashLoanRecipient recipient, bytes calldata data) external {
-		token.safeTransfer(msg.sender, amount);
+		//		token.ensureApprove(msg.sender, amount);
+		token.safeTransfer(address(recipient), amount);
 	}
 
 	function swap(address to, uint256 amount) public payable returns (uint) {
@@ -46,6 +47,7 @@ contract MockExchanges is TestERC20Token, Utils {
 			if (address(tokens[i]) == address(_weth)) {
 				payable(address(to)).transfer(amount);
 			} else {
+				tokens[i].ensureApprove(to, amount);
 				tokens[i].safeTransfer(to, amount);
 			}
 		}
