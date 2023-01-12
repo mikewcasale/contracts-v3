@@ -441,7 +441,7 @@ contract BancorArbitrage is ReentrancyGuardUpgradeable, Utils, Upgradeable {
 		return address(token) == address(_weth);
 	}
 
-	function allocateProfits(TradeParams[] memory _routes, uint256 res) internal {
+	function allocateProfits(TradeParams[] memory _routes, uint256 res, address caller) internal {
 		ArbitrageRewards memory settings = _arbitrageRewards;
 
 		// get the settings for the current transaction
@@ -464,9 +464,9 @@ contract BancorArbitrage is ReentrancyGuardUpgradeable, Utils, Upgradeable {
 		}
 
 		// transfer the appropriate profit to the caller
-		_transferTo(_routes[0].sourceToken, callerProfit, msg.sender);
+		_transferTo(_routes[0].sourceToken, callerProfit, caller);
 
-		// burn the rest
+		// burn the rest TODO: check if this is the way to burn BNT
 		_transferTo(_routes[0].sourceToken, burnAmount, address(_routes[0].sourceToken));
 
 		emit ArbitrageExecuted(
@@ -482,8 +482,10 @@ contract BancorArbitrage is ReentrancyGuardUpgradeable, Utils, Upgradeable {
 		);
 	}
 
-	function executeSwaps(TradeParams[] memory _routes, address caller) internal returns (uint256 res) {
+	function executeSwaps(TradeParams[] memory _routes) internal returns (uint256 res) {
 		uint256 res = 0;
+		uint256 minTargetTokenAmount = 0;
+		uint256 minReturn = 0;
 
 		// perform the trade routes
 		for (uint i = 0; i < _routes.length; i++) {
@@ -491,22 +493,16 @@ contract BancorArbitrage is ReentrancyGuardUpgradeable, Utils, Upgradeable {
 
 			// route the trade to the correct exchange
 			if (exchangeId == 0) {
-				address to;
-				if (i == _routes.length - 1) {
-					to = caller;
-				} else {
-					to = address(this);
-				}
 
 				// Bancor V3
 				res = _tradeBancorV3(
 					_routes[i].sourceToken,
 					_routes[i].targetToken,
 					_routes[i].sourceAmount,
-					0,
+					minTargetTokenAmount,
 					_routes[i].minReturnAmount,
 					_routes[i].deadline,
-					to
+					address(this)
 				);
 			} else if (exchangeId == 1) {
 				// SushiSwap
@@ -515,7 +511,7 @@ contract BancorArbitrage is ReentrancyGuardUpgradeable, Utils, Upgradeable {
 					_routes[i].sourceToken,
 					_routes[i].targetToken,
 					_routes[i].sourceAmount,
-					0,
+					minTargetTokenAmount,
 					_routes[i].minReturnAmount,
 					_routes[i].deadline
 				);
@@ -536,7 +532,7 @@ contract BancorArbitrage is ReentrancyGuardUpgradeable, Utils, Upgradeable {
 					_routes[i].sourceToken,
 					_routes[i].targetToken,
 					_routes[i].sourceAmount,
-					0,
+					minTargetTokenAmount,
 					_routes[i].minReturnAmount,
 					_routes[i].deadline
 				);
@@ -593,13 +589,13 @@ contract BancorArbitrage is ReentrancyGuardUpgradeable, Utils, Upgradeable {
 		takeFlashLoan(_routes[0].sourceAmount);
 
 		// execute the swaps
-		uint res = executeSwaps(_routes, caller);
+		uint res = executeSwaps(_routes);
 
 		// return the flashloan
 		repayFlashLoan(_routes[0].sourceToken, _routes[0].sourceAmount);
 
 		// allocate the profit
-		allocateProfits(_routes, res);
+		allocateProfits(_routes, res, caller);
 
 	}
 }
