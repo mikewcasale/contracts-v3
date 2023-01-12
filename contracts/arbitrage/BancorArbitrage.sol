@@ -220,7 +220,7 @@ contract BancorArbitrage is ReentrancyGuardUpgradeable, Utils, Upgradeable {
 	 *s
 	 * - the caller must be the admin of the contract
 	 */
-	function setArbitrageSettings(
+	function setRewards(
 		ArbitrageRewards calldata settings
 	)
 		external
