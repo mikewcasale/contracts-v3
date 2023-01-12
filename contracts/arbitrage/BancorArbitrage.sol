@@ -419,7 +419,7 @@ contract BancorArbitrage is ReentrancyGuardUpgradeable, Utils, Upgradeable {
 	}
 
 	/**
-	 * @dev transfer given amount of given token to the caller
+	 * @dev transfer given amount of given token to the specified address
 	 */
 	function _transferTo(Token token, uint256 amount, address to) private {
 		token.safeTransfer(to, amount);
