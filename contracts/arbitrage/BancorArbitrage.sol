@@ -364,36 +364,6 @@ contract BancorArbitrage is ReentrancyGuardUpgradeable, Utils, Upgradeable {
 		return uint256(amounts[amounts.length - 1]);
 	}
 
-	function processUniswapV2(
-		IUniswapV2Pair pair,
-		uint256 sourceTokenAmount,
-		IUniswapV2Router02 router,
-		Token[2] memory tokens,
-		address recipient
-	) internal returns (uint256) {
-		// trade on UniswapV2
-		IERC20(address(pair)).safeApprove(address(router), sourceTokenAmount);
-		uint256 deadline = block.timestamp + MAX_DEADLINE;
-		address[] memory path = new address[](2);
-		path[0] = address(tokens[0]);
-		path[1] = address(tokens[1]);
-
-		if (tokens[0].isNative()) {
-			router.swapExactETHForTokens(sourceTokenAmount, path, recipient, deadline);
-		} else if (tokens[1].isNative()) {
-			router.swapExactTokensForETH(sourceTokenAmount, 0, path, recipient, deadline);
-		} else {
-			router.swapExactTokensForTokens(sourceTokenAmount, 0, path, recipient, deadline);
-		}
-
-		// save states
-		uint256[2] memory previousBalances = [tokens[0].balanceOf(recipient), tokens[1].balanceOf(recipient)];
-
-		// calculate the amount of target tokens received
-		uint256 targetTokenAmount = tokens[1].balanceOf(recipient) - previousBalances[1];
-		return targetTokenAmount;
-	}
-
 	/**
 	 * @dev tratradedes on Uniswap V2
 	 */
@@ -423,7 +393,29 @@ contract BancorArbitrage is ReentrancyGuardUpgradeable, Utils, Upgradeable {
 			revert NoPairForTokens();
 		}
 
-		return processUniswapV2(pair, sourceTokenAmount, router, tokens, address(this));
+		// trade on UniswapV2
+		IERC20(address(pair)).safeApprove(address(router), sourceTokenAmount);
+		uint256 deadline = block.timestamp + MAX_DEADLINE;
+		address[] memory path = new address[](2);
+		path[0] = address(tokens[0]);
+		path[1] = address(tokens[1]);
+
+		address recipient = address(this);
+
+		if (tokens[0].isNative()) {
+			router.swapExactETHForTokens(sourceTokenAmount, path, recipient, deadline);
+		} else if (tokens[1].isNative()) {
+			router.swapExactTokensForETH(sourceTokenAmount, 0, path, recipient, deadline);
+		} else {
+			router.swapExactTokensForTokens(sourceTokenAmount, 0, path, recipient, deadline);
+		}
+
+		// save states
+		uint256[2] memory previousBalances = [tokens[0].balanceOf(recipient), tokens[1].balanceOf(recipient)];
+
+		// calculate the amount of target tokens received
+		uint256 targetTokenAmount = tokens[1].balanceOf(recipient) - previousBalances[1];
+		return targetTokenAmount;
 	}
 
 	/**
@@ -492,7 +484,6 @@ contract BancorArbitrage is ReentrancyGuardUpgradeable, Utils, Upgradeable {
 
 			// route the trade to the correct exchange
 			if (exchangeId == 0) {
-
 				// Bancor V3
 				res = _tradeBancorV3(
 					_routes[i].sourceToken,
@@ -595,6 +586,5 @@ contract BancorArbitrage is ReentrancyGuardUpgradeable, Utils, Upgradeable {
 
 		// allocate the profit
 		allocateProfits(_routes, res, caller);
-
 	}
 }
