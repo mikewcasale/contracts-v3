@@ -270,23 +270,23 @@ describe('BancorArbitrage', () => {
 			const deadline = DEADLINE;
 
 			await expect(
-                bancorArbitrage
-                    .connect(user)
-                    .execute(
-                        sourceToken1.address,
-                        targetToken1.address,
-                        sourceAmount1,
-                        sourceToken2.address,
-                        targetToken2.address,
-                        exchangeId2,
-                        sourceToken3.address,
-                        targetToken3.address,
-                        DEADLINE,
-                        {
-                            gasLimit: GAS_LIMIT * 3
-                        }
-                    )
-            ).to.be.revertedWithError('FirstTradeSourceMustBeBNT');
+				bancorArbitrage
+					.connect(user)
+					.execute(
+						sourceToken1.address,
+						targetToken1.address,
+						sourceAmount1,
+						sourceToken2.address,
+						targetToken2.address,
+						exchangeId2,
+						sourceToken3.address,
+						targetToken3.address,
+						DEADLINE,
+						{
+							gasLimit: GAS_LIMIT * 3
+						}
+					)
+			).to.be.revertedWithError('FirstTradeSourceMustBeBNT');
 		});
 
 		it('should revert when last trade target token is not BNT', async () => {
@@ -306,23 +306,23 @@ describe('BancorArbitrage', () => {
 			const deadline = DEADLINE;
 
 			await expect(
-                bancorArbitrage
-                    .connect(user)
-                    .execute(
-                        sourceToken1.address,
-                        targetToken1.address,
-                        sourceAmount1,
-                        sourceToken2.address,
-                        targetToken2.address,
-                        exchangeId2,
-                        sourceToken3.address,
-                        targetToken3.address,
-                        DEADLINE,
-                        {
-                            gasLimit: GAS_LIMIT * 3
-                        }
-                    )
-            ).to.be.revertedWithError('LastTradeTargetMustBeBNT');
+				bancorArbitrage
+					.connect(user)
+					.execute(
+						sourceToken1.address,
+						targetToken1.address,
+						sourceAmount1,
+						sourceToken2.address,
+						targetToken2.address,
+						exchangeId2,
+						sourceToken3.address,
+						targetToken3.address,
+						DEADLINE,
+						{
+							gasLimit: GAS_LIMIT * 3
+						}
+					)
+			).to.be.revertedWithError('LastTradeTargetMustBeBNT');
 		});
 
 		let externalExchanges = ['SushiSwap', 'UniswapV2', 'UniswapV3', 'BancorV2'];
@@ -536,7 +536,6 @@ describe('BancorArbitrage', () => {
 		const newBalances = await getBalances([token1, token2], bancorArbitrage.address);
 		expect(newBalances[token1.address].eq(previousBalances[token1.address].add(AMOUNT))).to.be.true;
 	};
-
 
 	const transfer = async (
 		sourceAccount: SignerWithAddress,
