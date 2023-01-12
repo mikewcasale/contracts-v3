@@ -236,7 +236,7 @@ describe('BancorArbitrage', () => {
 
 	describe('trades', () => {
 		beforeEach(async () => {
-			await exchanges.connect(user).approve(bancorArbitrage.address, MAX_SOURCE_AMOUNT);
+			await exchanges.connect(user).approve(bancorArbitrage.address, 100_000_000);
 		});
 
 		let exchangeNames = ['BancorV3', 'SushiSwap', 'UniswapV2', 'UniswapV3', 'BancorV2'];
@@ -264,27 +264,29 @@ describe('BancorArbitrage', () => {
 			const sourceAmount1 = AMOUNT;
 			const sourceToken2 = token2;
 			const targetToken2 = token3;
-			const sourceAmount2 = AMOUNT;
 			const exchangeId2 = 2;
 			const sourceToken3 = token3;
 			const targetToken3 = token1;
-			const sourceAmount3 = AMOUNT;
 			const deadline = DEADLINE;
 
 			await expect(
-				testTradeMultiRoute(
-					sourceToken1,
-					targetToken1,
-					sourceAmount1,
-					sourceToken2,
-					targetToken2,
-					exchangeId2,
-					sourceToken3,
-					targetToken3,
-					0,
-					deadline
-				)
-			).to.be.revertedWithError('FirstTradeSourceMustBeBNT');
+                bancorArbitrage
+                    .connect(user)
+                    .execute(
+                        sourceToken1.address,
+                        targetToken1.address,
+                        sourceAmount1,
+                        sourceToken2.address,
+                        targetToken2.address,
+                        exchangeId2,
+                        sourceToken3.address,
+                        targetToken3.address,
+                        DEADLINE,
+                        {
+                            gasLimit: GAS_LIMIT * 3
+                        }
+                    )
+            ).to.be.revertedWithError('FirstTradeSourceMustBeBNT');
 		});
 
 		it('should revert when last trade target token is not BNT', async () => {
@@ -298,27 +300,29 @@ describe('BancorArbitrage', () => {
 			const sourceAmount1 = AMOUNT;
 			const sourceToken2 = token2;
 			const targetToken2 = token3;
-			const sourceAmount2 = AMOUNT;
 			const exchangeId2 = 2;
 			const sourceToken3 = token3;
 			const targetToken3 = token1;
-			const sourceAmount3 = AMOUNT;
 			const deadline = DEADLINE;
 
 			await expect(
-				testTradeMultiRoute(
-					sourceToken1,
-					targetToken1,
-					sourceAmount1,
-					sourceToken2,
-					targetToken2,
-					exchangeId2,
-					sourceToken3,
-					targetToken3,
-					0,
-					deadline
-				)
-			).to.be.revertedWithError('LastTradeTargetMustBeBNT');
+                bancorArbitrage
+                    .connect(user)
+                    .execute(
+                        sourceToken1.address,
+                        targetToken1.address,
+                        sourceAmount1,
+                        sourceToken2.address,
+                        targetToken2.address,
+                        exchangeId2,
+                        sourceToken3.address,
+                        targetToken3.address,
+                        DEADLINE,
+                        {
+                            gasLimit: GAS_LIMIT * 3
+                        }
+                    )
+            ).to.be.revertedWithError('LastTradeTargetMustBeBNT');
 		});
 
 		let externalExchanges = ['SushiSwap', 'UniswapV2', 'UniswapV3', 'BancorV2'];
@@ -335,7 +339,7 @@ describe('BancorArbitrage', () => {
 				const sourceToken1 = bnt;
 				const targetToken1 = token1;
 				const sourceAmount1 = AMOUNT;
-				const exchangeId2 = i;
+				const exchangeId = i;
 				await exchanges.setTokens(sourceToken1.address, targetToken1.address);
 				const sourceToken2 = targetToken1;
 				const targetToken2 = token2;
@@ -359,12 +363,12 @@ describe('BancorArbitrage', () => {
 								sourceAmount1,
 								sourceToken2.address,
 								targetToken2.address,
-								exchangeId2,
+								exchangeId,
 								sourceToken3.address,
 								targetToken3.address,
 								DEADLINE,
 								{
-									gasLimit: GAS_LIMIT * 10
+									gasLimit: GAS_LIMIT * 3
 								}
 							)
 					).to.be.revertedWithError('NoPairForTokens');
@@ -378,12 +382,12 @@ describe('BancorArbitrage', () => {
 								sourceAmount1,
 								sourceToken2.address,
 								targetToken2.address,
-								exchangeId2,
+								exchangeId,
 								sourceToken3.address,
 								targetToken3.address,
 								DEADLINE,
 								{
-									gasLimit: GAS_LIMIT * 10
+									gasLimit: GAS_LIMIT * 3
 								}
 							)
 					).to.emit(bancorArbitrage, 'ArbitrageExecuted');
@@ -533,51 +537,6 @@ describe('BancorArbitrage', () => {
 		expect(newBalances[token1.address].eq(previousBalances[token1.address].add(AMOUNT))).to.be.true;
 	};
 
-	const testTradeMultiRoute = async (
-		sourceToken1: TokenWithAddress,
-		targetToken1: TokenWithAddress,
-		sourceAmount1: BigNumber,
-		sourceToken2: TokenWithAddress,
-		targetToken2: TokenWithAddress,
-		exchangeId2: number,
-		sourceToken3: TokenWithAddress,
-		targetToken3: TokenWithAddress,
-		minReturnAmount: BigNumber,
-		deadline: BigNumber
-	) => {
-		let allBalances = 0;
-
-		await transfer(deployer, sourceToken1, exchanges.address, MAX_SOURCE_AMOUNT);
-		await transfer(deployer, targetToken1, exchanges.address, MAX_SOURCE_AMOUNT);
-
-		await transfer(deployer, sourceToken2, exchanges.address, MAX_SOURCE_AMOUNT);
-		await transfer(deployer, targetToken2, exchanges.address, MAX_SOURCE_AMOUNT);
-
-		await transfer(deployer, sourceToken3, exchanges.address, MAX_SOURCE_AMOUNT);
-		await transfer(deployer, targetToken3, exchanges.address, MAX_SOURCE_AMOUNT);
-
-		const res = await bancorArbitrage
-			.connect(user)
-			.execute(
-				sourceToken1.address,
-				targetToken1.address,
-				sourceAmount1,
-				sourceToken2.address,
-				targetToken2.address,
-				exchangeId2,
-				sourceToken3.address,
-				targetToken3.address,
-				deadline,
-				{
-					gasLimit: GAS_LIMIT * 10
-				}
-			);
-
-		// assert
-		//        const newBalances = await getBalances([token1], exchanges.address);
-		//        const userBalances2 = await getBalances([token1], user.address);
-		//        expect(newBalances[token1.address].eq(previousBalances[token1.address].sub(allBalances + AMOUNT))).to.be.true;
-	};
 
 	const transfer = async (
 		sourceAccount: SignerWithAddress,
