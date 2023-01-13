@@ -72,6 +72,7 @@ contract BancorArbitrage is ReentrancyGuardUpgradeable, Utils, Upgradeable {
 		uint256 minReturnAmount;
 		uint256 deadline;
 		uint256 exchangeId;
+		address bancorV2Pool;
 	}
 
 	// Defines the arbitrage event to be emitted.
@@ -271,17 +272,22 @@ contract BancorArbitrage is ReentrancyGuardUpgradeable, Utils, Upgradeable {
 		uint256 minTargetTokenAmount,
 		uint256 minReturn,
 		uint256 deadline,
-		address caller
+		address recipient
 	) internal returns (uint256) {
-		return
-			_bancorNetworkV3.tradeBySourceAmount(
-				sourceToken,
-				targetToken,
-				sourceTokenAmount,
-				minTargetTokenAmount,
-				deadline,
-				caller
-			);
+
+		uint256[2] memory previousBalances = [sourceToken.balanceOf(recipient), targetToken.balanceOf(recipient)];
+
+		_bancorNetworkV3.tradeBySourceAmount(
+			sourceToken,
+			targetToken,
+			sourceTokenAmount,
+			minTargetTokenAmount,
+			deadline,
+			recipient
+		);
+
+		uint256 targetTokenAmount = targetToken.balanceOf(recipient) - previousBalances[1];
+		return targetTokenAmount;
 	}
 
 	/**
@@ -294,16 +300,25 @@ contract BancorArbitrage is ReentrancyGuardUpgradeable, Utils, Upgradeable {
 		uint256 amountOutMin
 	) internal returns (uint256) {
 		address[] memory path = _bancorNetworkV2.conversionPath(sourceToken, targetToken);
-		return
-			_bancorNetworkV2.convertByPath{ value: msg.value }(
-				path,
-				amountIn,
-				amountOutMin,
-				address(this),
-				address(this),
-				0
-			);
+
+		address recipient = address(this);
+
+		// calculate the amount of target tokens received
+		uint256[2] memory previousBalances = [sourceToken.balanceOf(recipient), targetToken.balanceOf(recipient)];
+
+		_bancorNetworkV2.convertByPath{ value: msg.value }(
+			path,
+			amountIn,
+			amountOutMin,
+			address(this),
+			address(this),
+			0
+		);
+
+		uint256 targetTokenAmount = targetToken.balanceOf(recipient) - previousBalances[1];
+		return targetTokenAmount;
 	}
+
 
 	/**
 	 * @dev performs the arbitrage trade on Uniswap V3
@@ -321,6 +336,8 @@ contract BancorArbitrage is ReentrancyGuardUpgradeable, Utils, Upgradeable {
 		address recipient = address(this);
 		uint160 sqrtPriceLimitX96 = 0;
 
+		uint256[2] memory previousBalances = [sourceToken.balanceOf(recipient), targetToken.balanceOf(recipient)];
+
 		ISwapRouter.ExactInputSingleParams memory params = ISwapRouter.ExactInputSingleParams(
 			address(sourceToken),
 			address(targetToken),
@@ -332,8 +349,11 @@ contract BancorArbitrage is ReentrancyGuardUpgradeable, Utils, Upgradeable {
 			sqrtPriceLimitX96
 		);
 
-		uint256 res = router.exactInputSingle(params);
-		return res;
+		router.exactInputSingle(params);
+
+		// calculate the amount of target tokens received
+		uint256 targetTokenAmount = targetToken.balanceOf(recipient) - previousBalances[1];
+		return targetTokenAmount;
 	}
 
 	/**
@@ -354,6 +374,9 @@ contract BancorArbitrage is ReentrancyGuardUpgradeable, Utils, Upgradeable {
 		path[0] = address(sourceToken);
 		path[1] = address(targetToken);
 
+		// save states
+		uint256[2] memory previousBalances = [sourceToken.balanceOf(recipient), targetToken.balanceOf(recipient)];
+
 		if (sourceToken.isNative()) {
 			amounts = router.swapExactETHForTokens(sourceTokenAmount, path, recipient, deadline);
 		} else if (targetToken.isNative()) {
@@ -361,7 +384,10 @@ contract BancorArbitrage is ReentrancyGuardUpgradeable, Utils, Upgradeable {
 		} else {
 			amounts = router.swapExactTokensForTokens(sourceTokenAmount, 0, path, recipient, deadline);
 		}
-		return uint256(amounts[amounts.length - 1]);
+
+		// calculate the amount of target tokens received
+		uint256 targetTokenAmount = targetToken.balanceOf(recipient) - previousBalances[1];
+		return targetTokenAmount;
 	}
 
 	/**
@@ -482,8 +508,13 @@ contract BancorArbitrage is ReentrancyGuardUpgradeable, Utils, Upgradeable {
 		for (uint i = 0; i < _routes.length; i++) {
 			uint exchangeId = _routes[i].exchangeId;
 
+			if (i > 0) {
+				_routes[i].sourceAmount = res;
+			}
+
 			// route the trade to the correct exchange
 			if (exchangeId == 0) {
+
 				// Bancor V3
 				res = _tradeBancorV3(
 					_routes[i].sourceToken,
@@ -495,6 +526,7 @@ contract BancorArbitrage is ReentrancyGuardUpgradeable, Utils, Upgradeable {
 					address(this)
 				);
 			} else if (exchangeId == 1) {
+
 				// SushiSwap
 				res = _tradeSushiSwap(
 					_sushiSwapRouter,
@@ -553,15 +585,18 @@ contract BancorArbitrage is ReentrancyGuardUpgradeable, Utils, Upgradeable {
 		uint16 exchangeId2,
 		Token sourceToken3,
 		Token targetToken3,
-		uint256 deadline
+		uint256 deadline,
+		address bancorV2Pool
 	) public {
 		address caller = msg.sender;
 
 		// parse the trade params
 		TradeParams[] memory _routes = new TradeParams[](3);
-		_routes[0] = TradeParams(sourceToken1, targetToken1, sourceAmount1, 0, deadline, 0);
-		_routes[1] = TradeParams(sourceToken2, targetToken2, sourceAmount1, 0, deadline, exchangeId2);
-		_routes[2] = TradeParams(sourceToken3, targetToken3, sourceAmount1, 0, deadline, 0);
+		_routes[0] = TradeParams(sourceToken1, targetToken1, sourceAmount1, 0, deadline, 0, bancorV2Pool);
+
+		// TODO: solve overflow error when sourceAmount1 below is not equal to sourceAmount1 above
+		_routes[1] = TradeParams(sourceToken2, targetToken2, sourceAmount1, 0, deadline, exchangeId2, bancorV2Pool);
+		_routes[2] = TradeParams(sourceToken3, targetToken3, sourceAmount1, 0, deadline, 0, bancorV2Pool);
 
 		// check if the initial trade source token is BNT
 		bool isFirstValid = _routes[0].sourceToken.isEqual(_bnt);

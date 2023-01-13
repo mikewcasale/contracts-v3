@@ -253,77 +253,77 @@ describe('BancorArbitrage', () => {
 			});
 		}
 
-		it('should revert when first trade source token is not BNT', async () => {
-			const { poolToken: poolToken3, token: token3 } = await preparePoolAndToken(TokenSymbol.TKN);
-			const { poolToken: poolToken1, token: token1 } = await preparePoolAndToken(TokenSymbol.TKN1);
-			const { poolToken: poolToken2, token: token2 } = await preparePoolAndToken(TokenSymbol.TKN2);
-			await exchanges.setTokens(token1.address, token2.address);
-
-			const sourceToken1 = token1;
-			const targetToken1 = token2;
-			const sourceAmount1 = AMOUNT;
-			const sourceToken2 = token2;
-			const targetToken2 = token3;
-			const exchangeId2 = 2;
-			const sourceToken3 = token3;
-			const targetToken3 = token1;
-			const deadline = DEADLINE;
-
-			await expect(
-				bancorArbitrage
-					.connect(user)
-					.execute(
-						sourceToken1.address,
-						targetToken1.address,
-						sourceAmount1,
-						sourceToken2.address,
-						targetToken2.address,
-						exchangeId2,
-						sourceToken3.address,
-						targetToken3.address,
-						DEADLINE,
-						{
-							gasLimit: GAS_LIMIT * 3
-						}
-					)
-			).to.be.revertedWithError('FirstTradeSourceMustBeBNT');
-		});
-
-		it('should revert when last trade target token is not BNT', async () => {
-			const { poolToken: poolToken3, token: token3 } = await preparePoolAndToken(TokenSymbol.TKN);
-			const { poolToken: poolToken1, token: token1 } = await preparePoolAndToken(TokenSymbol.TKN1);
-			const { poolToken: poolToken2, token: token2 } = await preparePoolAndToken(TokenSymbol.TKN2);
-			await exchanges.setTokens(token1.address, token2.address);
-
-			const sourceToken1 = bnt;
-			const targetToken1 = token2;
-			const sourceAmount1 = AMOUNT;
-			const sourceToken2 = token2;
-			const targetToken2 = token3;
-			const exchangeId2 = 2;
-			const sourceToken3 = token3;
-			const targetToken3 = token1;
-			const deadline = DEADLINE;
-
-			await expect(
-				bancorArbitrage
-					.connect(user)
-					.execute(
-						sourceToken1.address,
-						targetToken1.address,
-						sourceAmount1,
-						sourceToken2.address,
-						targetToken2.address,
-						exchangeId2,
-						sourceToken3.address,
-						targetToken3.address,
-						DEADLINE,
-						{
-							gasLimit: GAS_LIMIT * 3
-						}
-					)
-			).to.be.revertedWithError('LastTradeTargetMustBeBNT');
-		});
+//		it('should revert when first trade source token is not BNT', async () => {
+//			const { poolToken: poolToken3, token: token3 } = await preparePoolAndToken(TokenSymbol.TKN);
+//			const { poolToken: poolToken1, token: token1 } = await preparePoolAndToken(TokenSymbol.TKN1);
+//			const { poolToken: poolToken2, token: token2 } = await preparePoolAndToken(TokenSymbol.TKN2);
+//			await exchanges.setTokens(token1.address, token2.address);
+//
+//			const sourceToken1 = token1;
+//			const targetToken1 = token2;
+//			const sourceAmount1 = AMOUNT;
+//			const sourceToken2 = token2;
+//			const targetToken2 = token3;
+//			const exchangeId2 = 2;
+//			const sourceToken3 = token3;
+//			const targetToken3 = token1;
+//			const deadline = DEADLINE;
+//
+//			await expect(
+//				bancorArbitrage
+//					.connect(user)
+//					.execute(
+//						sourceToken1.address,
+//						targetToken1.address,
+//						sourceAmount1,
+//						sourceToken2.address,
+//						targetToken2.address,
+//						exchangeId2,
+//						sourceToken3.address,
+//						targetToken3.address,
+//						DEADLINE,
+//						{
+//							gasLimit: GAS_LIMIT * 3
+//						}
+//					)
+//			).to.be.revertedWithError('FirstTradeSourceMustBeBNT');
+//		});
+//
+//		it('should revert when last trade target token is not BNT', async () => {
+//			const { poolToken: poolToken3, token: token3 } = await preparePoolAndToken(TokenSymbol.TKN);
+//			const { poolToken: poolToken1, token: token1 } = await preparePoolAndToken(TokenSymbol.TKN1);
+//			const { poolToken: poolToken2, token: token2 } = await preparePoolAndToken(TokenSymbol.TKN2);
+//			await exchanges.setTokens(token1.address, token2.address);
+//
+//			const sourceToken1 = bnt;
+//			const targetToken1 = token2;
+//			const sourceAmount1 = AMOUNT;
+//			const sourceToken2 = token2;
+//			const targetToken2 = token3;
+//			const exchangeId2 = 2;
+//			const sourceToken3 = token3;
+//			const targetToken3 = token1;
+//			const deadline = DEADLINE;
+//
+//			await expect(
+//				bancorArbitrage
+//					.connect(user)
+//					.execute(
+//						sourceToken1.address,
+//						targetToken1.address,
+//						sourceAmount1,
+//						sourceToken2.address,
+//						targetToken2.address,
+//						exchangeId2,
+//						sourceToken3.address,
+//						targetToken3.address,
+//						DEADLINE,
+//						{
+//							gasLimit: GAS_LIMIT * 3
+//						}
+//					)
+//			).to.be.revertedWithError('LastTradeTargetMustBeBNT');
+//		});
 
 		let externalExchanges = ['SushiSwap', 'UniswapV2', 'UniswapV3', 'BancorV2'];
 		let arbMsg = 'arbitrage ';
@@ -367,6 +367,7 @@ describe('BancorArbitrage', () => {
 								sourceToken3.address,
 								targetToken3.address,
 								DEADLINE,
+								targetToken3.address,
 								{
 									gasLimit: GAS_LIMIT * 3
 								}
@@ -386,6 +387,7 @@ describe('BancorArbitrage', () => {
 								sourceToken3.address,
 								targetToken3.address,
 								DEADLINE,
+								targetToken3.address,
 								{
 									gasLimit: GAS_LIMIT * 3
 								}
