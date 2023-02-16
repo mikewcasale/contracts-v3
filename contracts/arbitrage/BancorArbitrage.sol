@@ -67,9 +67,6 @@ contract BancorArbitrage is ReentrancyGuardUpgradeable, Utils, Upgradeable {
     error InvalidInitialAndFinalTokens();
     error InvalidFlashLoanCaller();
 
-    // upgrade forward-compatibility storage gap
-    uint256[MAX_GAP - 2] private __gap;
-
     // Defines the trade parameters.
     struct Route {
         Token targetToken;
@@ -119,6 +116,9 @@ contract BancorArbitrage is ReentrancyGuardUpgradeable, Utils, Upgradeable {
 
     // the maximum number of trade routes supported
     uint256 private constant MAX_ROUTE_LENGTH = 10;
+
+    // upgrade forward-compatibility storage gap
+    uint256[MAX_GAP - 2] private __gap;
 
     /**
      * @dev triggered after a successful Arbitrage Executed
