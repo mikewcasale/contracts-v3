@@ -223,9 +223,10 @@ contract BancorArbitrage is ReentrancyGuardUpgradeable, Utils, Upgradeable {
     }
 
     function _validRouteLength(Route[] memory routes) internal pure {
-        if (routes.length > MAX_ROUTE_LENGTH) {
+        if ((routes.length > MAX_ROUTE_LENGTH) || (routes.length == 0)) {
             revert InvalidRouteLength();
         }
+        
     }
 
     /**
@@ -374,10 +375,10 @@ contract BancorArbitrage is ReentrancyGuardUpgradeable, Utils, Upgradeable {
             });
 
             if (sourceToken.isNative()) {
-                // it is the last trade and we are converting (ETH or TKN) to BNT
+                // we are converting ETH to BNT (or TKN)
                 val = targetAmount;
             } else {
-                // it is the first trade and we are converting BNT to (ETH or TKN)
+                // we are converting BNT to ETH (or TKN)
                 val = 0;
             }
 
