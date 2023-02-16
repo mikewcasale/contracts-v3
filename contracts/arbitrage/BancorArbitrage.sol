@@ -226,7 +226,7 @@ contract BancorArbitrage is ReentrancyGuardUpgradeable, Utils, Upgradeable {
         if ((routes.length > MAX_ROUTE_LENGTH) || (routes.length == 0)) {
             revert InvalidRouteLength();
         }
-        
+
     }
 
     /**
@@ -289,8 +289,6 @@ contract BancorArbitrage is ReentrancyGuardUpgradeable, Utils, Upgradeable {
         uint256 tradeIndex
     ) private {
 
-        uint256 val;
-
         // perform the trade
         if (exchangeId == 0) {
             // Bancor v3
@@ -316,13 +314,7 @@ contract BancorArbitrage is ReentrancyGuardUpgradeable, Utils, Upgradeable {
             path[1] = customAddress;
             path[2] = address(targetToken);
 
-            if (sourceToken.isNative()) {
-                // it is the last trade and we are converting (ETH or TKN) to BNT
-                val = targetAmount;
-            } else {
-                // it is the first trade and we are converting BNT to (ETH or TKN)
-                val = 0;
-            }
+            uint val = sourceToken.isNative() ? targetAmount : 0;
 
             // perform the trade
             _bancorNetworkV2.convertByPath{ value: val }(path, targetAmount, minTargetAmount, address(0x0), address(0x0), 0);
@@ -374,13 +366,7 @@ contract BancorArbitrage is ReentrancyGuardUpgradeable, Utils, Upgradeable {
                 sqrtPriceLimitX96: sqrtPriceLimitX96
             });
 
-            if (sourceToken.isNative()) {
-                // we are converting ETH to BNT (or TKN)
-                val = targetAmount;
-            } else {
-                // we are converting BNT to ETH (or TKN)
-                val = 0;
-            }
+            uint val = sourceToken.isNative() ? targetAmount : 0;
 
             // perform the trade
             _uniswapV3Router.exactInputSingle{ value: val }(params);
