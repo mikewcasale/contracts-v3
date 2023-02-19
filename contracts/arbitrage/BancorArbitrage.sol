@@ -74,7 +74,6 @@ contract BancorArbitrage is ReentrancyGuardUpgradeable, Utils, Upgradeable {
         uint256 exchangeId;
         address customAddress;
         uint256 deadline;
-        uint256 sqrtPriceLimitX96;
         uint256 fee;
     }
 
@@ -127,10 +126,9 @@ contract BancorArbitrage is ReentrancyGuardUpgradeable, Utils, Upgradeable {
         address caller,
         address[] path,
         uint[] exchangePath,
-        uint256 sourceAmount,
-        uint256 totalRewards,
+        uint256 protocolRevenue,
         uint256 callerRewards,
-        uint256 burnAmount
+        uint256 sourceAmount
     );
 
     /**
@@ -385,25 +383,23 @@ contract BancorArbitrage is ReentrancyGuardUpgradeable, Utils, Upgradeable {
      */
     function allocateRewards(
         Route[] memory routes,
-        uint256 totalRemaining,
-        address caller,
-        uint256 totalReturned
+        uint256 sourceAmount,
+        uint256 totalRewards,
+        address caller
     ) internal {
         uint256 burnAmount = 0;
         Token bntToken = Token(address(_bnt));
 
-        // calculate the Rewards
-        uint256 totalRewards = totalRemaining - totalReturned;
-
         // calculate the proportion of the Rewards to send to the caller
         uint256 callerRewards = MathEx.mulDivF(totalRewards, _rewards.percentagePPM, PPM_RESOLUTION);
-
-        burnAmount = totalRewards - callerRewards;
 
         // calculate the proportion of the Rewards to burn
         if (callerRewards > _rewards.maxAmount) {
             callerRewards = _rewards.maxAmount;
         }
+
+        // calculate the proportion of protocol revenue
+        uint256 protocolRevenue = totalRewards - callerRewards;
 
         // transfer the appropriate Rewards to the caller
         uint remainingBalance = bntToken.balanceOf(address(this));
@@ -412,28 +408,33 @@ contract BancorArbitrage is ReentrancyGuardUpgradeable, Utils, Upgradeable {
             remainingBalance = bntToken.balanceOf(address(this));
         }
 
-        // burn the rest
-        if (burnAmount < remainingBalance) {
-            bntToken.safeTransfer(address(_bnt), burnAmount);
+        // transfer the appropriate protocol revenue (burn)
+        if (protocolRevenue < remainingBalance) {
+            bntToken.safeTransfer(address(_bnt), protocolRevenue);
+        }
+
+        // build the path
+        address[] memory path = new address[](routes.length * 2);
+        path[0] = address(_bnt);
+        for (uint i = 0; i < routes.length; i++) {
+            path[i * 2 + 1] = address(routes[i].targetToken);
+            path[i * 2 + 2] = address(routes[i].targetToken);
+        }
+
+        // build the exchange path
+        uint256[] memory exchangePath = new uint256[](routes.length);
+        for (uint i = 0; i < routes.length; i++) {
+            exchangePath[i] = routes[i].exchangeId;
         }
 
         //emit the Rewards event
-        address[] memory path = new address[](routes.length * 2);
-        for (uint256 i = 0; i < routes.length; i++) {
-            path[i * 2 + 1] = address(routes[i].targetToken);
-        }
-        uint[] memory exchangePath = new uint[](routes.length);
-        for (uint256 i = 0; i < routes.length; i++) {
-            exchangePath[i] = routes[i].exchangeId;
-        }
         emit ArbitrageExecuted(
             caller,
             path,
             exchangePath,
-            totalReturned,
-            totalRewards,
             callerRewards,
-            burnAmount
+            protocolRevenue,
+            sourceAmount
         );
     }
 
@@ -466,7 +467,7 @@ contract BancorArbitrage is ReentrancyGuardUpgradeable, Utils, Upgradeable {
             // save states
             previousBalance = routes[i].targetToken.balanceOf(address(this));
 
-            uint160 sqrtPriceLimitX96 = uint160(routes[i].sqrtPriceLimitX96);
+            uint160 sqrtPriceLimitX96 = uint160(0);
             uint24 fee = uint24(routes[i].fee);
             Token tokenIn;
 
@@ -496,14 +497,20 @@ contract BancorArbitrage is ReentrancyGuardUpgradeable, Utils, Upgradeable {
             targetAmount = routes[i].targetToken.balanceOf(address(this)) - previousBalance;
         }
 
+        // calculate the total remaining tokens
         uint totalRemaining = token.balanceOf(address(this));
-        uint totalReturned = amount + feeAmount;
 
-        // allocate the Rewards
-        allocateRewards(routes, totalRemaining, trader, totalReturned);
+        // calculate the total amount to return
+        uint totalReturned = amount + feeAmount;
 
         // return the flashloan
         token.safeTransfer(msg.sender, totalReturned);
+
+        // calculate the total Rewards
+        uint256 totalRewards = totalRemaining - totalReturned;
+
+        // allocate the Rewards
+        allocateRewards(routes, totalReturned, totalRewards, trader);
     }
 
     /**
