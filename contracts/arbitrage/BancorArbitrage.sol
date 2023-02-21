@@ -117,7 +117,7 @@ contract BancorArbitrage is ReentrancyGuardUpgradeable, Utils, Upgradeable {
     uint256 private constant MAX_ROUTE_LENGTH = 10;
 
     // upgrade forward-compatibility storage gap
-    uint256[MAX_GAP - 2] private __gap;
+    uint256[MAX_GAP - 0] private __gap;
 
     /**
      * @dev triggered after a successful Arbitrage Executed
@@ -463,7 +463,6 @@ contract BancorArbitrage is ReentrancyGuardUpgradeable, Utils, Upgradeable {
 
         // perform the trade routes
         for (uint i = 0; i < routes.length; i++) {
-
             // save states
             previousBalance = routes[i].targetToken.balanceOf(address(this));
 
@@ -514,7 +513,7 @@ contract BancorArbitrage is ReentrancyGuardUpgradeable, Utils, Upgradeable {
     }
 
     /**
-     * @dev execute multi-step arbitrage trade between Banroutesher exchange
+     * @dev execute multi-step arbitrage trade between exchanges
      */
     function execute(
         Route[] memory routes,
@@ -528,6 +527,7 @@ contract BancorArbitrage is ReentrancyGuardUpgradeable, Utils, Upgradeable {
         // enforce the initial sourceAmount to be greater than the minimum
         greaterThanZero(sourceAmount)
     {
+        console.log("execute");
         if (
             (address(routes[routes.length - 1].targetToken) != address(_bnt))
         ) {

@@ -95,13 +95,13 @@ describe('BancorArbitrage', () => {
     };
 
     interface TradeParams {
-        sourceToken: TokenWithAddress;
         targetToken: TokenWithAddress;
         sourceAmount: BigNumberish;
         minTargetAmount: BigNumberish;
         path: Addressable[];
         exchangeId: number;
         deadline: BigNumberish;
+        fee: BigNumberish;
     }
 
     shouldHaveGap('TestBancorArbitrage');
@@ -228,7 +228,7 @@ describe('BancorArbitrage', () => {
         });
     });
 
-    describe('settings', () => {
+    describe('rewards', () => {
         it('should revert when a non-admin attempts to set the arbitrage rewards settings', async () => {
             await expect(
                 bancorArbitrage.connect(nonOwner).setRewards(ArbitrageRewardsDefaults)
@@ -300,43 +300,39 @@ describe('BancorArbitrage', () => {
 
                             const routes = [
                                 {
-                                    sourceToken: bnt.address,
                                     targetToken: token1.address,
                                     minTargetAmount: 1,
                                     exchangeId: 1,
                                     customAddress: token1.address,
-                                    deadline: DEADLINE
+                                    deadline: DEADLINE,
+                                    fee: 0
                                 },
                                 {
-                                    sourceToken: token1.address,
                                     targetToken: token2.address,
                                     minTargetAmount: 1,
                                     exchangeId: exchangeId,
                                     customAddress: token2.address,
-                                    deadline: DEADLINE
+                                    deadline: DEADLINE,
+                                    fee: 0
                                 },
                                 {
-                                    sourceToken: token2.address,
                                     targetToken: bnt.address,
                                     minTargetAmount: 1,
                                     exchangeId: 1,
                                     customAddress: bnt.address,
-                                    deadline: DEADLINE
+                                    deadline: DEADLINE,
+                                    fee: 0
                                 }
                             ];
 
-                            //                            let arbMsgFinal = arbMsgNew.concat(exchangeId2.toString());
-                            //							it(arbMsgFinal, async () => {
                             await bancorArbitrage.connect(user).execute(routes, AMOUNT, {
-                                gasLimit: BigNumber.from(GAS_LIMIT * 6)
+                                gasLimit: GAS_LIMIT * 6
                             });
-                            //							});
                         }
                     }
                 }
             }
         });
-        //		}
     });
 
     const preparePoolAndToken = async (symbol: TokenSymbol) => {
