@@ -304,7 +304,6 @@ contract BancorArbitrage is ReentrancyGuardUpgradeable, Utils, Upgradeable {
         } else if (exchangeId == 1) {
 
             // Bancor v2
-            sourceToken.safeApprove(address(_bancorNetworkV2), targetAmount);
 
             // build the path
             address[] memory path = new address[](3);
@@ -313,6 +312,8 @@ contract BancorArbitrage is ReentrancyGuardUpgradeable, Utils, Upgradeable {
             path[2] = address(targetToken);
 
             uint val = sourceToken.isNative() ? targetAmount : 0;
+
+            sourceToken.safeApprove(address(_bancorNetworkV2), val);
 
             // perform the trade
             _bancorNetworkV2.convertByPath{ value: val }(path, targetAmount, minTargetAmount, address(0x0), address(0x0), 0);
@@ -414,12 +415,13 @@ contract BancorArbitrage is ReentrancyGuardUpgradeable, Utils, Upgradeable {
         }
 
         // build the path
-        address[] memory path = new address[](routes.length * 2);
+        address[] memory path = new address[](6);
         path[0] = address(_bnt);
-        for (uint i = 0; i < routes.length; i++) {
-            path[i * 2 + 1] = address(routes[i].targetToken);
-            path[i * 2 + 2] = address(routes[i].targetToken);
-        }
+        path[1] = address(routes[0].targetToken);
+        path[2] = address(routes[0].targetToken);
+        path[3] = address(routes[1].targetToken);
+        path[4] = address(routes[1].targetToken);
+        path[5] = address(routes[2].targetToken);
 
         // build the exchange path
         uint256[] memory exchangePath = new uint256[](routes.length);
@@ -448,6 +450,8 @@ contract BancorArbitrage is ReentrancyGuardUpgradeable, Utils, Upgradeable {
         uint256 feeAmount,
         bytes memory data
     ) external {
+
+
         Token token = Token(address(erc20Token));
         uint256 previousBalance;
 
@@ -527,7 +531,7 @@ contract BancorArbitrage is ReentrancyGuardUpgradeable, Utils, Upgradeable {
         // enforce the initial sourceAmount to be greater than the minimum
         greaterThanZero(sourceAmount)
     {
-        console.log("execute");
+
         if (
             (address(routes[routes.length - 1].targetToken) != address(_bnt))
         ) {
