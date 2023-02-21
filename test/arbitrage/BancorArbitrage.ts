@@ -293,16 +293,8 @@ describe('BancorArbitrage', () => {
                             console.log('exchangeId', exchangeId);
 
                             await transfer(deployer, bnt, masterVault.address, AMOUNT * 10 + GAS_LIMIT);
-//                            await transfer(deployer, token1, masterVault.address, AMOUNT * 10 + GAS_LIMIT);
-//                            await transfer(deployer, token2, masterVault.address, AMOUNT * 10 + GAS_LIMIT);
-//
-                            await transfer(deployer, bnt, exchanges.address, AMOUNT * 10 + GAS_LIMIT);
-//                            await transfer(deployer, token1, exchanges.address, AMOUNT * 10 + GAS_LIMIT);
-//                            await transfer(deployer, token2, exchanges.address, AMOUNT * 10 + GAS_LIMIT);
-//
-//                            await transfer(deployer, bnt, user.address, AMOUNT * 10 + GAS_LIMIT);
-//                            await transfer(deployer, token1, user.address, AMOUNT * 10 + GAS_LIMIT);
-//                            await transfer(deployer, token2, user.address, AMOUNT * 10 + GAS_LIMIT);
+                            await transfer(deployer, token1, masterVault.address, AMOUNT * 10 + GAS_LIMIT);
+                            await transfer(deployer, token2, masterVault.address, AMOUNT * 10 + GAS_LIMIT);
 
                             await exchanges.setTokens(token1.address, token2.address);
 
