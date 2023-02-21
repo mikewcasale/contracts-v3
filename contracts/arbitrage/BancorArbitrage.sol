@@ -117,7 +117,7 @@ contract BancorArbitrage is ReentrancyGuardUpgradeable, Utils, Upgradeable {
     uint256 private constant MAX_ROUTE_LENGTH = 10;
 
     // upgrade forward-compatibility storage gap
-    uint256[MAX_GAP - 2] private __gap;
+    uint256[MAX_GAP - 0] private __gap;
 
     /**
      * @dev triggered after a successful Arbitrage Executed
@@ -416,10 +416,12 @@ contract BancorArbitrage is ReentrancyGuardUpgradeable, Utils, Upgradeable {
         // build the path
         address[] memory path = new address[](routes.length * 2);
         path[0] = address(_bnt);
-        for (uint i = 0; i < routes.length; i++) {
-            path[i * 2 + 1] = address(routes[i].targetToken);
-            path[i * 2 + 2] = address(routes[i].targetToken);
-        }
+        path[1] = address(routes[0].targetToken);
+        path[2] = address(routes[0].targetToken);
+        path[3] = address(routes[1].targetToken);
+        path[4] = address(routes[1].targetToken);
+        path[5] = address(routes[2].targetToken);
+
 
         // build the exchange path
         uint256[] memory exchangePath = new uint256[](routes.length);
@@ -514,7 +516,7 @@ contract BancorArbitrage is ReentrancyGuardUpgradeable, Utils, Upgradeable {
     }
 
     /**
-     * @dev execute multi-step arbitrage trade between Banroutesher exchange
+     * @dev execute multi-step arbitrage trade between exchange
      */
     function execute(
         Route[] memory routes,
